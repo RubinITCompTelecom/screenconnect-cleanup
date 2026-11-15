@@ -127,6 +127,8 @@ $script:ConsoleSaved = Set-GuiConsoleEncoding
 $script:ShareUrl = ''
 # The share step printed "MICROBIN UPLOAD: skipped; ..." (ticked, but no server configured): its reason.
 $script:ShareSkipped = ''
+# Characters in the console pane, counted as they are appended (reading .Text copies the whole pane).
+$script:ConsoleChars = 0
 $script:SessionWriteWarned = $false
 # The modes the window offers and their labels come from gui\steps.json ("Window": true), the one list.
 # The core also knows 'Full' (START-HERE.bat with no flag), but in the window it would only repeat
@@ -207,7 +209,13 @@ function Add-ConsoleLines {
     if (@($Lines).Count -eq 0) { return }
     $text = (@($Lines) -join "`r`n") + "`r`n"
     $ui.ConsoleBox.AppendText($text)
-    if ($ui.ConsoleBox.Text.Length -gt 400000) { $ui.ConsoleBox.Text = $ui.ConsoleBox.Text.Substring(200000) }
+    # The length is counted here, not read from .Text: .Text builds a copy of the whole pane on every read.
+    $script:ConsoleChars += $text.Length
+    if ($script:ConsoleChars -gt 400000) {
+        # Cap the pane: keep the newest half. The full output is in gui-console.log.
+        $ui.ConsoleBox.Text = $ui.ConsoleBox.Text.Substring(200000)
+        $script:ConsoleChars = $ui.ConsoleBox.Text.Length
+    }
     $ui.ConsoleBox.ScrollToEnd()
     Write-GuiLogText ((@($Lines)) -join "`r`n")
 }
@@ -818,6 +826,7 @@ function Start-Run {
         $script:LogPath = Join-Path $logs 'gui-console.log'
     }
     $ui.ConsoleBox.Clear()
+    $script:ConsoleChars = 0
     $ui.CardsHost.Children.Clear()
     $ui.Banner.Visibility = 'Collapsed'
     $ui.ReviewBar.Visibility = 'Collapsed'

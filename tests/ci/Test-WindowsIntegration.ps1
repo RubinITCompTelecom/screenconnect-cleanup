@@ -705,6 +705,10 @@ if ($ruv5 -and $rbp5 -and $compiledOk -and $compiledHang -and $sanityOk5) {
         # evaluate the production bounded runner first (pure function: process
         # start/wait/kill plus Write-Log only, no registry/service/removal).
         Invoke-Expression $runc5
+        # Load the production MSI parser used by the extracted uninstaller.
+        $msiParser5 = $fdefs5 | Where-Object { $_.Name -eq 'Get-MsiProductCode' } | Select-Object -First 1
+        if (-not $msiParser5) { throw 'Get-MsiProductCode not found in production script.' }
+        Invoke-Expression $msiParser5.Extent.Text
         Invoke-Expression $fnPatched5
         $Execute = $true
 

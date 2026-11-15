@@ -165,7 +165,18 @@ function Invoke-Launcher {
     # Keep-Awake is started asynchronously by the batch, so its line has no stable position.
     $lines = @(Get-Content -LiteralPath $trace | Where-Object { $_ -and $_ -notlike 'Keep-Awake.ps1|*' })
     $outText = ''
-    if (Test-Path -LiteralPath $out) { $outText = [IO.File]::ReadAllText($out) }
+    if (Test-Path -LiteralPath $out) {
+        # The asynchronous keep-awake stub can briefly retain the redirected
+        # output handle after cmd exits. Wait for that writer before reading.
+        $readDeadline = [DateTime]::UtcNow.AddSeconds(15)
+        while ($true) {
+            try { $outText = [IO.File]::ReadAllText($out); break }
+            catch [IO.IOException] {
+                if ([DateTime]::UtcNow -ge $readDeadline) { throw }
+                Start-Sleep -Milliseconds 100
+            }
+        }
+    }
     return [pscustomobject]@{ Timeout = $false; Exit = $p.ExitCode; Trace = $lines; Out = $outText }
 }
 

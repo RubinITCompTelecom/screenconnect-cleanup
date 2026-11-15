@@ -3,7 +3,8 @@
 Semantic versions. The deploy zip is named `screenconnect-cleanup-v<VER>.zip`
 and carries a `VERSION` file so each build is self-identifying.
 
-## [Unreleased] - README rewrite, one-liner installer fix
+## [1.8.12-gui-beta.2] - 2026-11-15 - Online half runs the cleanup; README rewrite, one-liner installer fix
+**Testing zip** (branch fix/gui-skips-removal). Same as gui-beta.1 plus the changes below.
 - **Fix: the window's Online half skipped the cleanup and went straight to the scanners** on a PC
   with no finished Offline run (including right after Stage tools, which makes no run). The Online
   half has no removal step and silently became a scanner-only run. It now asks: **Clean up first,

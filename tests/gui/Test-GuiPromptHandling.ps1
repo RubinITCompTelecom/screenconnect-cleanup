@@ -165,6 +165,29 @@ Write-Host ('COLOUR=' + $a)
     $r = Wait-GuiChild $child { param($pp, $ch) $st.Raised++ } -QuietSeconds 1
     Check ($r.Exited -and $st.Raised -eq 0) 'a long quiet step that ends its lines is NOT mistaken for a question'
 
+    # collect-snapshot.ps1 rewrites one progress line in place ("`r" + text, no newline) and can sit on it
+    # for a long time in a slow section. That must not raise the "waiting for an answer" box (steps 3, 8b).
+    $prog = Write-Script 'progress.ps1' @'
+Write-Host 'Collecting snapshot'
+Write-Host -NoNewline ("`r" + '  [snapshot before] 1/12 sections, 0s elapsed      ')
+Start-Sleep -Seconds 1
+Write-Host -NoNewline ("`r" + '  [snapshot before] 2/12 sections, 1s elapsed      ')
+Start-Sleep -Seconds 4
+Write-Host ("`r" + '  [snapshot before] 12/12 sections, 5s elapsed      ')
+Write-Host 'snapshot written'
+'@
+    $child = Start-GuiChild -ScriptPath $prog -ArgumentList @()
+    $st = @{ Raised = 0 }
+    $r = Wait-GuiChild $child { param($pp, $ch) $st.Raised++ } -QuietSeconds 1
+    Check ($r.Exited -and $st.Raised -eq 0) 'a quiet in-place progress line (collect-snapshot style) is NOT mistaken for a question'
+    Check ($child.Transcript.ToString() -match 'snapshot written') 'the progress-line child ran to the end without an answer'
+    foreach ($q in 'Pick a colour:', 'Proceed? ', 'Continue [y/N]', 'Choose one >', 'Type the name', 'Enter a number (1-3)') {
+        Check (Test-GuiQuestionLike -Text $q) ('reads like a question: "' + $q + '"')
+    }
+    foreach ($q in '  [snapshot after] 7/12 sections, 31s elapsed      ', 'Collecting processes...', '45%', '') {
+        Check (-not (Test-GuiQuestionLike -Text $q)) ('not a question: "' + $q + '"')
+    }
+
     Write-Host 'Output handling' -ForegroundColor Cyan
     $big = Write-Script 'big.ps1' @'
 1..5000 | ForEach-Object { Write-Host ('line ' + $_) }

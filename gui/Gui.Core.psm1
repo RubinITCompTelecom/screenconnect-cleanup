@@ -799,11 +799,27 @@ function Test-GuiPromptMatch {
     return $false
 }
 
+function Test-GuiQuestionLike {
+    # True when an unfinished line reads like a question that waits for typed input: it ends in
+    # ? : ] > or ), carries a [y/N]-style choice, or starts with Type / Enter / Press / Choose /
+    # Select. A progress line written in place with a carriage return and no newline (collect-
+    # snapshot.ps1: "  [snapshot before] 3/12 sections, 45s elapsed") is none of these, so a
+    # slow section never raises the "waiting for an answer" box and stalls steps 3 and 8b.
+    param([string]$Text)
+    $t = ([string]$Text).Trim()
+    if ($t -eq '') { return $false }
+    if ($t -match '[?:\]>)]$') { return $true }
+    if ($t -match '(?i)\[\s*[yn]\s*/\s*[yn]\s*\]') { return $true }
+    if ($t -match '(?i)^(type|enter|press|choose|select)\b') { return $true }
+    return $false
+}
+
 function Get-GuiPendingPrompt {
     # Looks at the UNFINISHED output line (the prompt is printed with -NoNewline). Known
     # prompts match the table. Anything else that sits unfinished and quiet for 5 seconds
-    # becomes a generic "the tool is waiting for an answer" box (4.3 rule 4). Complete lines
-    # never trigger the generic box, so a long quiet scan does not look like a question.
+    # AND reads like a question (Test-GuiQuestionLike) becomes a generic "the tool is waiting
+    # for an answer" box (4.3 rule 4). Complete lines never trigger the generic box, so a long
+    # quiet scan does not look like a question, and neither does a progress line.
     # A box the technician marked "not a question" stays away for -RepeatSeconds; if the tool
     # is still sitting on the same text after that, it really is waiting, so it comes back
     # (a script blocked on Read-Host would otherwise wait forever).
@@ -816,6 +832,7 @@ function Get-GuiPendingPrompt {
             return [pscustomobject]@{ Kind = 'Known'; Row = $row; Text = $t }
         }
     }
+    if (-not (Test-GuiQuestionLike -Text $t)) { return $null }
     $now = (Get-Date).ToUniversalTime()
     $quiet = ($now - $Child.LastOutputUtc).TotalSeconds
     if ($quiet -lt $QuietSeconds) { return $null }
@@ -1034,6 +1051,6 @@ Export-ModuleMember -Function `
     Get-GuiFinalStatus, Invoke-GuiBuiltin, Find-GuiFindings, `
     Set-GuiConsoleEncoding, Restore-GuiConsoleEncoding, `
     Start-GuiChild, Update-GuiChild, Send-GuiAnswer, Stop-GuiChild, `
-    Get-GuiPromptTable, Test-GuiPromptMatch, Get-GuiPendingPrompt, Set-GuiPromptDismissed, Get-GuiShareUrl, Get-GuiShareSkipped, `
+    Get-GuiPromptTable, Test-GuiPromptMatch, Test-GuiQuestionLike, Get-GuiPendingPrompt, Set-GuiPromptDismissed, Get-GuiShareUrl, Get-GuiShareSkipped, `
     Read-GuiJson, ConvertTo-GuiItems, Get-GuiFindingsView, Get-GuiScannerResult, Get-GuiPersistenceView, Get-GuiDiffView, Get-GuiReportInfo, `
     Save-GuiSession, Get-GuiWindowModes

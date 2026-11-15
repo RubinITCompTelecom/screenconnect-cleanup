@@ -40,8 +40,9 @@ function Set-GuiStub {
     # The launcher's hidden Keep-Awake stub starts asynchronously and holds the output file for a moment;
     # a window stub that lingers 3 s lets it finish before the harness reads the output.
     param($Harness, [int]$ExitCode = 0)
-    $f = Get-ChildItem -Path $Harness.Dir -Filter 'Start-CleanupGui.ps1' -Recurse -File | Select-Object -First 1
-    if ($f) { Set-Content -LiteralPath $f.FullName -Value ($stubText.Replace('exit 0', 'Start-Sleep -Seconds 3; exit ' + $ExitCode)) -Encoding ASCII }
+    $guiStub = Join-Path $Harness.Dir 'gui\Start-CleanupGui.ps1'
+    if (-not (Test-Path -LiteralPath $guiStub)) { throw 'GUI stub is missing from the harness.' }
+    Set-Content -LiteralPath $guiStub -Value ($stubText.Replace('exit 0', 'Start-Sleep -Seconds 3; exit ' + $ExitCode)) -Encoding ASCII
 }
 
 try {

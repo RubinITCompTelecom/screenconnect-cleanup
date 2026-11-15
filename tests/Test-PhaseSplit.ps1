@@ -97,7 +97,10 @@ function New-Harness {
     param([string]$Name, [string]$BatPath)
     $dir = Join-Path $work $Name
     $null = New-Item -ItemType Directory -Path $dir -Force
-    Copy-Item -Path (Join-Path $ToolRoot '*') -Destination $dir -Recurse -Force
+    # Local agent checkouts are not tool payload and may contain other copies
+    # of the scripts. Keep them out of the fixture and recursive stub searches.
+    Get-ChildItem -LiteralPath $ToolRoot | Where-Object { $_.Name -notin @('.git', '.claude', '.agents') } |
+        Copy-Item -Destination $dir -Recurse -Force
     # drop anything that is not part of the tool (an old test harness, etc.)
     $ritRoot = Join-Path $work ($Name + '-rit-scc')
     $null = New-Item -ItemType Directory -Path $ritRoot -Force
@@ -134,6 +137,9 @@ function New-Harness {
     foreach ($b in @(Get-ChildItem -Path $dir -Filter '*.bat' -File)) {
         $raw = [IO.File]::ReadAllText($b.FullName)
         $raw = $raw.Replace('{exit 0}else{exit 1}', '{exit 0}else{exit 0}').Replace('C:\RIT-SCC', $ritRoot)
+        # Keep-awake lifetime has its own runtime test. Its asynchronous stub
+        # otherwise inherits redirected output and races fixture reads.
+        $raw = [regex]::Replace($raw, '(?m)^start "" powershell.exe [^\r\n]*Keep-Awake\.ps1"[ \t]*\r?$', 'rem [test] keep-awake covered separately')
         # The report copy goes to the Desktop: point it at a temp folder, never the real one.
         $raw = $raw.Replace("[Environment]::GetFolderPath('Desktop')", "'" + $deskDir + "'")
         if ($b.Name -eq 'START-HERE.bat') { $raw = Disable-ReportOpen $raw }

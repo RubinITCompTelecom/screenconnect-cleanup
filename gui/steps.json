@@ -136,7 +136,7 @@
       "Phases": ["ALL", "OFFLINE"],
       "Calls": [
         { "Script": "diff-snapshots.ps1",
-          "Args": ["-BeforeFile", "{RunRoot}\\snapshot_before.json", "-AfterFile", "{RunRoot}\\snapshot_after.json", "-OutFile", "{RunRoot}\\snapshot_diff.json"],
+          "Args": ["-BeforeFile", "{RunRoot}\\snapshot_before.json", "-AfterFile", "{RunRoot}\\snapshot_after.json", "-OutFile", "{RunRoot}\\snapshot_diff.json", "{@ManifestArgs}"],
           "When": ["Exists:{RunRoot}\\snapshot_before.json", "Exists:{RunRoot}\\snapshot_after.json"],
           "SkipText": "The before or after snapshot is missing, so there is nothing to diff.",
           "OnNonZero": "Diff" }

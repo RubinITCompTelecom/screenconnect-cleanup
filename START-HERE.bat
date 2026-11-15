@@ -451,7 +451,9 @@ if not exist "!SCC_RUN_ROOT!\snapshot_before.json" (
     if not exist "!SCC_RUN_ROOT!\snapshot_after.json" (
         echo     [WARN] After-snapshot was not written - skipping the diff.
     ) else (
-        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!diff-snapshots.ps1" -BeforeFile "!SCC_RUN_ROOT!\snapshot_before.json" -AfterFile "!SCC_RUN_ROOT!\snapshot_after.json" -OutFile "!SCC_RUN_ROOT!\snapshot_diff.json"
+        set "SCC_DIFF_MANIFEST="
+        if exist "!SCC_RUN_ROOT!\removal-manifest.json" set "SCC_DIFF_MANIFEST=-RemovalManifest "!SCC_RUN_ROOT!\removal-manifest.json""
+        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!diff-snapshots.ps1" -BeforeFile "!SCC_RUN_ROOT!\snapshot_before.json" -AfterFile "!SCC_RUN_ROOT!\snapshot_after.json" -OutFile "!SCC_RUN_ROOT!\snapshot_diff.json" !SCC_DIFF_MANIFEST!
         rem exit 1 from diff = RESURRECTION detected, a finding not a failure
         if errorlevel 2 (
             echo     [WARN] Diff failed to run.

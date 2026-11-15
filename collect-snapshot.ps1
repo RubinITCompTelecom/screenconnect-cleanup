@@ -26,9 +26,9 @@
     Services         : service Name (unique on a machine, survives restarts)
     ScheduledTasks   : TaskPath + "|" + TaskName (the pair Task Scheduler
                        itself treats as the unique identity)
-    RegistryAutoruns : Hive + "|" + KeyPath + "|" + ValueName (identifies one
+    RegistryAutoruns : Hive + "|" + KeyPath + "|" + ValueName (per-user rows read every loaded user hive; KeyPath carries the SID, UserSid/UserName fields name the user) (identifies one
                        named value in one key; the run-key mechanism itself)
-    StartupFolders   : the folder Scope ("AllUsers"/"CurrentUser") + "|" +
+    StartupFolders   : the folder Scope ("AllUsers"/"User") + "|" + (user SID for "User") + "|" +
                        the file name (path itself is stable per machine/user,
                        but we key on scope+name so a rename shows as a real
                        diff instead of silently vanishing/appearing)
@@ -40,7 +40,7 @@
     Connections      : LocalAddress+Port + "|" + RemoteAddress+Port + "|" +
                        State + "|" + PID - same caveat as Processes, this
                        section is inherently volatile and point-in-time
-    InstalledPrograms: registry root hint + "|" + the uninstall subkey name
+    InstalledPrograms: registry root hint + "|" + (user SID for HKCU rows) + "|" + the uninstall subkey name
                        (that subkey name is usually the product/upgrade code
                        or a stable slug - it is the identity Windows itself
                        uses for the entry)
@@ -63,7 +63,7 @@
                        itself stores; case-folded so a diff is not fooled
                        by casing noise from our own decoder)
     BamDam           : service ("bam"/"dam") + "|" + SID + "|" + value name
-    UserAssist       : GUID + "|" + ROT13-decoded program/shortcut name
+    UserAssist       : user SID + "|" + GUID + "|" + ROT13-decoded program/shortcut name
     Srum             : NOT an identity-diffed array - a single object with
                        DB inventory + SHA-256 + offline-copy status. Diff on
                        DatabaseSha256 (changed = new activity was recorded).
@@ -145,6 +145,72 @@ function Add-CollectionWarning {
         Section = $Section
         Warning = $WarningText
     })
+}
+
+$script:UserProfileCache = $null
+
+function Get-UserProfileRoots {
+    # Every real user profile on the PC, not just the account running this
+    # script (the elevating technician is rarely the person whose PC it is).
+    # Same approach as Persistence.Inventory.psm1: ProfileList gives SID + folder,
+    # HKEY_USERS\<SID> is that user's hive while it is loaded. Hives are never
+    # mounted here (read-only), so an unloaded profile is returned with
+    # Loaded = $false and the caller records a warning.
+    param(
+        [string]$ProfileListPath = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList',
+        [string]$HiveRootPrefix  = 'Registry::HKEY_USERS'
+    )
+    $profiles = New-Object System.Collections.Generic.List[object]
+    if (Test-Path -LiteralPath $ProfileListPath) {
+        foreach ($key in @(Get-ChildItem -LiteralPath $ProfileListPath -ErrorAction Stop)) {
+            $sid = [string]$key.PSChildName
+            if ($sid -notmatch '^S-1-(5-21|12-1)-') { continue }
+            $img = $null
+            try { $img = [string](Get-ItemProperty -LiteralPath $key.PSPath -Name ProfileImagePath -ErrorAction Stop).ProfileImagePath } catch { }
+            if (-not $img) { continue }
+            $folder = [System.Environment]::ExpandEnvironmentVariables($img)
+            $root = $HiveRootPrefix + '\' + $sid
+            $profiles.Add([PSCustomObject]@{
+                Sid          = $sid
+                Name         = (Split-Path -Path $folder -Leaf)
+                ProfilePath  = $folder
+                HiveRoot     = $root
+                Loaded       = [bool](Test-Path -LiteralPath $root)
+                AppData      = (Join-Path $folder 'AppData\Roaming')
+                LocalAppData = (Join-Path $folder 'AppData\Local')
+            })
+        }
+    }
+    return $profiles.ToArray()
+}
+
+function Get-CachedUserProfiles {
+    # Profiles for the sections that read per-user state (computed once per
+    # process). Adds the running account's own HKCU/APPDATA as a fallback when
+    # it has no loaded ProfileList entry, so nothing the old code saw is lost.
+    if ($null -ne $script:UserProfileCache) { return $script:UserProfileCache }
+    $list = New-Object System.Collections.Generic.List[object]
+    try {
+        foreach ($p in @(Get-UserProfileRoots)) {
+            $list.Add($p)
+            if (-not $p.Loaded) {
+                Add-CollectionWarning -Section 'UserProfiles' -WarningText ("Profile {0} ({1}): user hive is not loaded, so its per-user registry keys were not read (its files were)." -f $p.Name, $p.Sid)
+            }
+        }
+    } catch {
+        Add-CollectionError -Section 'UserProfiles' -ErrorText "ProfileList enumeration: $($_.Exception.Message)"
+    }
+    $curSid = $null
+    try { $curSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch { }
+    if ($curSid -and -not @($list | Where-Object { $_.Loaded -and $_.Sid -eq $curSid })) {
+        $list.Add([PSCustomObject]@{
+            Sid = $curSid; Name = [string]$env:USERNAME; ProfilePath = [string]$env:USERPROFILE
+            HiveRoot = 'HKCU:'; Loaded = $true
+            AppData = [string]$env:APPDATA; LocalAppData = [string]$env:LOCALAPPDATA
+        })
+    }
+    $script:UserProfileCache = $list.ToArray()
+    return $script:UserProfileCache
 }
 
 function Invoke-Section {
@@ -251,6 +317,8 @@ function Get-ScheduledTasksSection {
 # Registry autoruns (Run/RunOnce, Winlogon Shell/Userinit)
 # ---------------------------------------------------------------------------
 function Get-RegistryAutorunsSection {
+    param($Profiles = $null)
+    if ($null -eq $Profiles) { $Profiles = Get-CachedUserProfiles }
     $rows = New-Object System.Collections.Generic.List[object]
 
     # Run/RunOnce keys across hive x view(32/64) combinations.
@@ -264,9 +332,14 @@ function Get-RegistryAutorunsSection {
         @{ Hive = 'HKLM'; View = '64'; Path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' }
         @{ Hive = 'HKLM'; View = '32'; Path = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run' }
         @{ Hive = 'HKLM'; View = '32'; Path = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce' }
-        @{ Hive = 'HKCU'; View = '64'; Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' }
-        @{ Hive = 'HKCU'; View = '64'; Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' }
     )
+    # Per-user keys: one pair per loaded user hive (HKEY_USERS\<SID>), tagged
+    # with UserSid/UserName. Hive stays 'HKCU' = "a per-user hive".
+    foreach ($p in @($Profiles)) {
+        if (-not $p.Loaded) { continue }
+        $runKeySpecs += @{ Hive = 'HKCU'; View = '64'; Path = ($p.HiveRoot + '\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'); Sid = $p.Sid; User = $p.Name }
+        $runKeySpecs += @{ Hive = 'HKCU'; View = '64'; Path = ($p.HiveRoot + '\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'); Sid = $p.Sid; User = $p.Name }
+    }
 
     foreach ($spec in $runKeySpecs) {
         try {
@@ -282,6 +355,8 @@ function Get-RegistryAutorunsSection {
                         ValueName = $valueName
                         Value     = ConvertTo-NullSafeString $val
                         Kind      = 'RunKey'
+                        UserSid   = $(if ($spec.ContainsKey('Sid')) { $spec.Sid } else { $null })
+                        UserName  = $(if ($spec.ContainsKey('User')) { $spec.User } else { $null })
                     })
                 }
             }
@@ -296,8 +371,11 @@ function Get-RegistryAutorunsSection {
     # some tooling/malware sets one there.
     $winlogonSpecs = @(
         @{ Hive = 'HKLM'; Path = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' }
-        @{ Hive = 'HKCU'; Path = 'HKCU:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' }
     )
+    foreach ($p in @($Profiles)) {
+        if (-not $p.Loaded) { continue }
+        $winlogonSpecs += @{ Hive = 'HKCU'; Path = ($p.HiveRoot + '\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'); Sid = $p.Sid; User = $p.Name }
+    }
     foreach ($spec in $winlogonSpecs) {
         try {
             if (Test-Path -LiteralPath $spec.Path) {
@@ -312,6 +390,8 @@ function Get-RegistryAutorunsSection {
                             ValueName = $valueName
                             Value     = ConvertTo-NullSafeString $val
                             Kind      = 'Winlogon'
+                            UserSid   = $(if ($spec.ContainsKey('Sid')) { $spec.Sid } else { $null })
+                            UserName  = $(if ($spec.ContainsKey('User')) { $spec.User } else { $null })
                         })
                     }
                 }
@@ -328,15 +408,18 @@ function Get-RegistryAutorunsSection {
 # Startup folders (per-user and all-users)
 # ---------------------------------------------------------------------------
 function Get-StartupFoldersSection {
+    param($Profiles = $null)
+    if ($null -eq $Profiles) { $Profiles = Get-CachedUserProfiles }
     $rows = New-Object System.Collections.Generic.List[object]
 
     $allUsersStartup = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\StartUp'
-    $currentUserStartup = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
 
-    $folderSpecs = @(
-        @{ Scope = 'AllUsers'; Path = $allUsersStartup }
-        @{ Scope = 'CurrentUser'; Path = $currentUserStartup }
-    )
+    $folderSpecs = New-Object System.Collections.Generic.List[object]
+    $folderSpecs.Add(@{ Scope = 'AllUsers'; Path = $allUsersStartup; Sid = $null; User = $null })
+    # One folder per user profile (files do not need the hive loaded).
+    foreach ($p in @($Profiles)) {
+        $folderSpecs.Add(@{ Scope = 'User'; Path = (Join-Path $p.AppData 'Microsoft\Windows\Start Menu\Programs\Startup'); Sid = $p.Sid; User = $p.Name })
+    }
 
     foreach ($spec in $folderSpecs) {
         try {
@@ -344,8 +427,10 @@ function Get-StartupFoldersSection {
                 $files = Get-ChildItem -LiteralPath $spec.Path -File -ErrorAction Stop
                 foreach ($f in $files) {
                     $rows.Add([PSCustomObject]@{
-                        Key          = "$($spec.Scope)|$($f.Name)"
+                        Key          = $(if ($spec.Sid) { "$($spec.Scope)|$($spec.Sid)|$($f.Name)" } else { "$($spec.Scope)|$($f.Name)" })
                         Scope        = $spec.Scope
+                        UserSid      = $spec.Sid
+                        UserName     = $spec.User
                         FileName     = $f.Name
                         FullPath     = $f.FullName
                         LastWriteUtc = $f.LastWriteTimeUtc.ToString('yyyy-MM-dd HH:mm:ss')
@@ -436,13 +521,19 @@ function Get-ConnectionsSection {
 # Installed programs - all three Uninstall roots
 # ---------------------------------------------------------------------------
 function Get-InstalledProgramsSection {
+    param($Profiles = $null)
+    if ($null -eq $Profiles) { $Profiles = Get-CachedUserProfiles }
     $rows = New-Object System.Collections.Generic.List[object]
 
     $roots = @(
-        @{ Hint = 'HKLM64'; Path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall' }
-        @{ Hint = 'HKLM32'; Path = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall' }
-        @{ Hint = 'HKCU';   Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall' }
+        @{ Hint = 'HKLM64'; Path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'; Sid = $null; User = $null }
+        @{ Hint = 'HKLM32'; Path = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'; Sid = $null; User = $null }
     )
+    # Hint stays 'HKCU' for every per-user hive; the SID makes the Key unique.
+    foreach ($p in @($Profiles)) {
+        if (-not $p.Loaded) { continue }
+        $roots += @{ Hint = 'HKCU'; Path = ($p.HiveRoot + '\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'); Sid = $p.Sid; User = $p.Name }
+    }
 
     foreach ($root in $roots) {
         try {
@@ -455,8 +546,10 @@ function Get-InstalledProgramsSection {
                     if ([string]::IsNullOrWhiteSpace($displayName)) { continue }
                     $subKeyName = Split-Path -Leaf $sk.PSPath
                     $rows.Add([PSCustomObject]@{
-                        Key             = "$($root.Hint)|$subKeyName"
+                        Key             = $(if ($root.Sid) { "$($root.Hint)|$($root.Sid)|$subKeyName" } else { "$($root.Hint)|$subKeyName" })
                         Root            = $root.Hint
+                        UserSid         = $root.Sid
+                        UserName        = $root.User
                         SubKeyName      = $subKeyName
                         DisplayName     = $displayName
                         DisplayVersion  = ConvertTo-NullSafeString $props.DisplayVersion
@@ -707,6 +800,14 @@ function Get-RecentFilesSection {
     if ($env:PUBLIC) { $roots.Add($env:PUBLIC) }
     # ProgramData
     if ($env:ProgramData) { $roots.Add($env:ProgramData) }
+
+    # The same user-owned roots for EVERY profile, not only the account running
+    # this script (files do not need the hive loaded).
+    foreach ($p in @(Get-CachedUserProfiles)) {
+        foreach ($r in @($p.AppData, $p.LocalAppData, (Join-Path $p.ProfilePath 'Downloads'))) {
+            if ($r -and -not $roots.Contains($r)) { $roots.Add($r) }
+        }
+    }
 
     $maxDepth = 6
     $capHit = $false
@@ -1097,11 +1198,27 @@ function Convert-UserAssistFileTime {
 }
 
 function Get-UserAssistSection {
-    param([int]$WindowDays)
+    param([int]$WindowDays, $Profiles = $null)
+    if ($null -eq $Profiles) { $Profiles = Get-CachedUserProfiles }
 
     $rows = New-Object System.Collections.Generic.List[object]
-    $root = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\UserAssist'
-    if (-not (Test-Path -LiteralPath $root)) { return $rows }
+    foreach ($p in @($Profiles)) {
+        if (-not $p.Loaded) { continue }
+        $root = $p.HiveRoot + '\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\UserAssist'
+        try {
+            Add-UserAssistRows -Rows $rows -Root $root -WindowDays $WindowDays -Sid $p.Sid -UserName $p.Name
+        } catch {
+            Add-CollectionError -Section 'UserAssist' -ErrorText "Reading $($root): $($_.Exception.Message)"
+        }
+    }
+    return $rows
+}
+
+function Add-UserAssistRows {
+    param($Rows, [string]$Root, [int]$WindowDays, [string]$Sid, [string]$UserName)
+    $rows = $Rows
+    $root = $Root
+    if (-not (Test-Path -LiteralPath $root)) { return }
 
     # The two well-known count GUIDs; unknown GUIDs are still collected and
     # labelled by their GUID so nothing is silently dropped.
@@ -1132,7 +1249,9 @@ function Get-UserAssistSection {
                 } catch { }
                 $lastExecutionText = if ($lastExecution) { $lastExecution.ToString('yyyy-MM-dd HH:mm:ss') } else { '' }
                 $rows.Add([PSCustomObject]@{
-                    Key               = "$guid|$decoded"
+                    Key               = "$Sid|$guid|$decoded"
+                    UserSid           = $Sid
+                    UserName          = $UserName
                     Guid              = $guid
                     Kind              = $kind
                     EncodedName       = $valueName
@@ -1146,7 +1265,6 @@ function Get-UserAssistSection {
             Add-CollectionError -Section 'UserAssist' -ErrorText "Reading $($countKey): $($_.Exception.Message)"
         }
     }
-    return $rows
 }
 
 # ---------------------------------------------------------------------------

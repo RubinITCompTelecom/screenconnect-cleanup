@@ -112,7 +112,7 @@ Check 'path containment rejects reparse points' (($remover -match 'FileAttribute
 Check 'moved quarantine payload ACLs are recursively verified' (($remover -match 'Protect-QuarantinePathAcl -Path \$destPath') -and ($remover -match 'Get-ChildItem -LiteralPath \$Path -Recurse') -and ($remover -match 'AreAccessRulesProtected'))
 Check 'deferred quarantine records structured identity fields' (($remover -match 'SourceIdentity') -and ($remover -match 'Get-PathIdentityHash -Path \$resumeDest') -and ($remover -match 'identity mismatch'))
 Check 'quarantine verifies identity after move' (($remover -match 'destinationIdentity') -and ($remover -match 'Post-move identity mismatch') -and ($remover -match 'Get-PathIdentityHash -Path \$destPath'))
-Check 'failed resume registration cancels delayed move' (($remover -match 'pending move cancelled') -and ($remover -match 'MoveFileEx\(\$SourcePath, \$null'))
+Check 'resume task is registered BEFORE the delayed MoveFileEx is queued' (($remover -match '(?s)Set-RunOnceResume -InstanceId \$InstanceId -WorkDir \$WorkDir\)\) \{.{0,400}no move was queued.{0,900}MoveFileEx\(\$SourcePath, \$destPath') -and ($remover -notmatch 'MoveFileEx\(\$SourcePath, \$null') -and ($remover -notmatch 'pending move cancelled'))
 Check 'successful vendor uninstall requires postconditions' (($remover -match 'UninstallPostcondition') -and ($remover -match 'install directory remains') -and ($remover -match 'service.*remains'))
 Check 'resume requires script and plan hash identity' (($remover -match 'ScriptHash') -and ($remover -match 'PlanHash') -and ($remover -match 'ResumeMarkerIdentityFailed'))
 Check 'BAM/DAM uses a native full registry key path for timestamps' (($collect -match 'nativeKeyPath') -and ($collect -match 'GetLastWriteUtc'))

@@ -1630,6 +1630,15 @@ function Move-ToQuarantine {
 
             if ($isLocked) {
                 Write-Log "  File in use, scheduling move on reboot via MoveFileEx" 'Warn'
+                # Register the resume task FIRST. MoveFileEx(DELAY_UNTIL_REBOOT)
+                # cannot be cancelled once queued (passing a NULL destination
+                # deletes the file at reboot instead), so the move is only queued
+                # when the resume action that finishes the job already exists.
+                $resumeAlreadyDeferred = ($script:DeferredQuarantineInstanceIds -contains $InstanceId)
+                if (-not (Set-RunOnceResume -InstanceId $InstanceId -WorkDir $WorkDir)) {
+                    Write-Log "  Reboot-resume task could not be registered; NOT queuing the move-on-reboot. $SourcePath stays where it is." 'Error'
+                    throw 'Could not register an elevated reboot-resume action; no move was queued'
+                }
                 # Use MoveFileEx with MOVEFILE_DELAY_UNTIL_REBOOT
                 $kernelType = 'Win32.Kernel32' -as [type]
                 if (-not $kernelType) {
@@ -1642,20 +1651,10 @@ function Move-ToQuarantine {
                 $result = $kernelType::MoveFileEx($SourcePath, $destPath, $MOVEFILE_DELAY_UNTIL_REBOOT)
                 if (-not $result) {
                     $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+                    # Nothing was queued; drop the resume task we just made unless
+                    # an earlier deferred move for this instance still needs it.
+                    if (-not $resumeAlreadyDeferred) { Remove-ResumeTask -InstanceId $InstanceId }
                     throw "MoveFileEx failed with error $err"
-                }
-                # Set RunOnce to resume; inability to register a resume path is
-                # a safety failure, not a warning that can be ignored.
-                if (-not (Set-RunOnceResume -InstanceId $InstanceId -WorkDir $WorkDir)) {
-                    # Cancel the already-queued delayed move before returning
-                    # failure; otherwise Windows may still move the payload at
-                    # reboot without any resume cleanup attached.
-                    $cancelled = $kernelType::MoveFileEx($SourcePath, $null, $MOVEFILE_DELAY_UNTIL_REBOOT)
-                    if (-not $cancelled) {
-                        $cancelError = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
-                        throw "Could not register reboot-resume action and could not cancel pending MoveFileEx (error $cancelError)"
-                    }
-                    throw 'Could not register an elevated reboot-resume action; pending move cancelled'
                 }
                 if (-not ($script:DeferredQuarantineInstanceIds -contains $InstanceId)) {
                     [void]$script:DeferredQuarantineInstanceIds.Add($InstanceId)

@@ -176,6 +176,15 @@ try {
     $s.RunRoot = Join-Path $work 'share-fail'
     [void](Complete-GuiAction -Session $s -Action $fake -ExitCode 1)
     Check (-not [bool]$s.Shared -and -not [bool]$s.ShareBuilt) 'a failed share step refreshes nothing'
+
+    Write-Host 'Uploader output: link, skipped, disabled' -ForegroundColor Cyan
+    Check ((Get-GuiShareUrl @('x', 'MICROBIN UPLOAD: https://p.example.invalid/p/a1')) -eq 'https://p.example.invalid/p/a1') 'the paste link is read'
+    Check ((Get-GuiShareUrl @('MICROBIN UPLOAD: skipped; no MicroBin server URL is configured')) -eq '') 'a skipped upload is not mistaken for a link'
+    Check ((Get-GuiShareSkipped @('MICROBIN UPLOAD: skipped; no MicroBin server URL is configured')) -eq 'no MicroBin server URL is configured') 'a skipped upload is detected with its reason (review #18)'
+    Check ((Get-GuiShareSkipped @('MICROBIN UPLOAD: disabled by operator', 'MICROBIN UPLOAD: https://p.example.invalid/p/a1')) -eq '') 'an unticked (disabled) or real upload is not a skip'
+    $uploader = [IO.File]::ReadAllText((Join-Path $ToolRoot 'Submit-ConnectWiseReport.ps1'))
+    $m = [regex]::Match($uploader, "Write-Host 'MICROBIN UPLOAD: (skipped[^']*)'")
+    Check ($m.Success -and (Get-GuiShareSkipped @('MICROBIN UPLOAD: ' + $m.Groups[1].Value)) -ne '') 'the skip line the real uploader prints is recognised'
     $s = New-GuiSession -Mode Offline -ToolRoot $ToolRoot -RitRoot (Join-Path $work 'share-offline') -Answers @{ ShareReport = $true }
     $sub = @(@((Get-GuiCatalog).Steps | Where-Object { $_.Id -eq '9b' })[0].Calls)[0]
     Check (@(Expand-GuiArgs -Session $s -Template $sub.Args) -contains '-NoUpload') 'the offline half never uploads, whatever the tick box says'

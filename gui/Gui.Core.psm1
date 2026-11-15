@@ -840,6 +840,18 @@ function Get-GuiShareUrl {
     return ''
 }
 
+function Get-GuiShareSkipped {
+    # Submit-ConnectWiseReport.ps1 prints "MICROBIN UPLOAD: skipped; <reason>" when sharing was asked
+    # for but there is no server to send to (microbin-url.txt empty or missing). Returns the reason,
+    # or '' when no such line is present. "disabled by operator" (-NoUpload) is not a skip.
+    param([string[]]$Lines)
+    foreach ($l in @($Lines)) {
+        $m = [regex]::Match([string]$l, '^\s*MICROBIN UPLOAD:\s*skipped\b;?\s*(.*?)\s*$')
+        if ($m.Success) { if ($m.Groups[1].Value) { return $m.Groups[1].Value }; return 'skipped' }
+    }
+    return ''
+}
+
 # ---------------------------------------------------------------------------------------
 # Artifact readers (read-only; tolerate missing or half-written files)
 # ---------------------------------------------------------------------------------------
@@ -1022,6 +1034,6 @@ Export-ModuleMember -Function `
     Get-GuiFinalStatus, Invoke-GuiBuiltin, Find-GuiFindings, `
     Set-GuiConsoleEncoding, Restore-GuiConsoleEncoding, `
     Start-GuiChild, Update-GuiChild, Send-GuiAnswer, Stop-GuiChild, `
-    Get-GuiPromptTable, Test-GuiPromptMatch, Get-GuiPendingPrompt, Set-GuiPromptDismissed, Get-GuiShareUrl, `
+    Get-GuiPromptTable, Test-GuiPromptMatch, Get-GuiPendingPrompt, Set-GuiPromptDismissed, Get-GuiShareUrl, Get-GuiShareSkipped, `
     Read-GuiJson, ConvertTo-GuiItems, Get-GuiFindingsView, Get-GuiScannerResult, Get-GuiPersistenceView, Get-GuiDiffView, Get-GuiReportInfo, `
     Save-GuiSession, Get-GuiWindowModes

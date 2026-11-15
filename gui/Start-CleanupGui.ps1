@@ -125,6 +125,8 @@ $script:DlgChecks = @{}
 $script:DlgText = $null
 $script:ConsoleSaved = Set-GuiConsoleEncoding
 $script:ShareUrl = ''
+# The share step printed "MICROBIN UPLOAD: skipped; ..." (ticked, but no server configured): its reason.
+$script:ShareSkipped = ''
 $script:SessionWriteWarned = $false
 # The modes the window offers and their labels come from gui\steps.json ("Window": true), the one list.
 # The core also knows 'Full' (START-HERE.bat with no flag), but in the window it would only repeat
@@ -782,7 +784,7 @@ function Start-Run {
     param([string]$ModeName)
     $script:Finished = $false
     # A second run in the same window must never show the previous run's paste link.
-    $script:ShareUrl = ''
+    $script:ShareUrl = ''; $script:ShareSkipped = ''
     # The share tick box (Online only, ticked by default). Test hook: a canned "ShareReport" answer stands in for it.
     $share = [bool]$ui.CbShare.IsChecked
     $ta = Get-TestAnswer 'ShareReport'
@@ -1007,6 +1009,7 @@ function Show-RunSummary {
         if ($s.Status -eq 'Skipped') { Add-SummaryLine 'Report share' ('not shared - ' + $s.Message) 'Muted' }
         elseif ($sid -eq '9o' -and $s.Status -eq 'Done' -and -not [bool]$Sess.Answers['ShareReport']) { Add-SummaryLine 'Report share' 'not shared - you unticked sharing. The report and connectwise-report.zip are on this PC only.' 'Muted' }
         elseif ($s.Status -ne 'Done') { Add-SummaryLine 'Report share' ('failed - ' + $s.Message + ' The local report is kept.') 'DangerFg' }
+        elseif ($sid -eq '9o' -and $script:ShareSkipped) { Add-SummaryLine 'Report share' ('NOT shared - ' + $script:ShareSkipped + ' (microbin-url.txt beside the tool is empty). The report and connectwise-report.zip are on this PC only.') 'WarningFg' }
         elseif ($script:ShareUrl) { Add-SummaryLine 'Report shared - paste link' $script:ShareUrl -Selectable }
         elseif ($Sess.Phase -eq 'OFFLINE') { Add-SummaryLine 'Report' 'package built on this PC, not uploaded (the Online half shares it)' 'Muted' }
         else { Add-SummaryLine 'Report share' 'done (no paste link was printed)' 'Muted' }
@@ -1033,6 +1036,7 @@ function Write-ResultFile {
             StartPanelVisible = ($ui.StartPanel.Visibility -eq 'Visible'); RunPanelVisible = ($ui.RunPanel.Visibility -eq 'Visible')
             KeepIdentifiers = @($script:Session.Answers['KeepIdentifiers'])
             ShareUrl = $script:ShareUrl
+            ShareSkipped = $script:ShareSkipped
             ShareReport = [bool]$script:Session.Answers['ShareReport']
             # A TextBlock built from Runs (bold label + value) reports no .Text, so read its Runs.
             CardTexts = @($ui.CardsHost.Children | ForEach-Object {
@@ -1066,6 +1070,8 @@ function Invoke-Tick {
         if ($script:Action -and ($script:Action.StepId -eq '9b' -or $script:Action.StepId -eq '9o')) {
             $url = Get-GuiShareUrl $u.Lines
             if ($url) { $script:ShareUrl = $url }
+            $skip = Get-GuiShareSkipped $u.Lines
+            if ($skip) { $script:ShareSkipped = $skip }
         }
     }
     if ($u.Exited) {
@@ -1085,6 +1091,8 @@ function Invoke-Tick {
             }
         }
         $o = Complete-GuiAction -Session $script:Session -Action $a -ExitCode ([int]$u.ExitCode)
+        # Ticked, but the uploader had no server to send to: the run is not "shared".
+        if ($a.StepId -eq '9o' -and $script:ShareSkipped) { $script:Session.Shared = $false }
         $script:Child = $null
         $script:Action = $null
         Add-ConsoleNote ('Step ' + $o.StepId + ' ended with exit code ' + $o.ExitCode + ' (' + $o.Status + ')' + $(if ($o.Message) { ': ' + $o.Message } else { '' }))
@@ -1180,7 +1188,7 @@ $ui.BtnStart.add_Click({ Start-Run (Get-SelectedMode) })
 $ui.BtnReviewContinue.add_Click({ Complete-Review })
 $ui.BtnNewRun.add_Click({
         $script:Session = $null; $script:Action = $null; $script:Child = $null; $script:LogPath = ''; $script:Finished = $false
-        $script:ShareUrl = ''
+        $script:ShareUrl = ''; $script:ShareSkipped = ''
         $ui.RunText.Text = 'Run folder: none yet'
         Set-PreviewMode (Get-SelectedMode); Update-HeaderButtons; Show-Panel 'Start'
     })

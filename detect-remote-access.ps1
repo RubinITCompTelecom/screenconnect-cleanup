@@ -45,12 +45,14 @@ param(
     # Don't wait for Enter at the end (for unattended / piped runs).
     [switch]$NoPause,
 
-    # Automatic MicroBin report share after detection (MicroBin only; no relay).
-    # The server base URL comes from microbin-url.txt beside the script unless
-    # -MicroBinUrl is given. Use -NoReportShare to suppress it for callers
-    # (sc-cleanup.ps1 / START-HERE.bat) that share once after the final report.
+    # Optional MicroBin report share after detection (MicroBin only; no relay).
+    # OFF by default: a standalone detect run uploads nothing unless the operator
+    # passes -ShareReport. The server base URL comes from microbin-url.txt beside
+    # the script unless -MicroBinUrl is given. -NoReportShare is still accepted
+    # (sc-cleanup.ps1 / START-HERE.bat / the GUI pass it) and always wins.
     [string]$MicroBinUrl,
     [string]$MicroBinUploaderPasswordFile,
+    [switch]$ShareReport,
     [switch]$NoReportShare,
 
     # Optional folder that receives a copy of the console transcript (saved
@@ -176,6 +178,13 @@ function Write-Section {
     Write-Host ("-" * 70) -ForegroundColor DarkCyan
     [void]$script:LogLines.Add("")
     [void]$script:LogLines.Add("=== $Title ===")
+}
+
+function Test-ReportShareRequested {
+    # Sharing is opt-in (review #8): only an explicit -ShareReport uploads, and
+    # -NoReportShare always suppresses it.
+    param([switch]$ShareReport, [switch]$NoReportShare)
+    return ([bool]$ShareReport -and -not [bool]$NoReportShare)
 }
 
 function Invoke-ReportUploader {
@@ -1095,14 +1104,16 @@ try {
         }
     }
 
-    if (-not $NoReportShare) {
+    if (Test-ReportShareRequested -ShareReport:$ShareReport -NoReportShare:$NoReportShare) {
         $uploadRc = Invoke-ReportUploader -FindingsPath $jsonPath -OutputDirectory $outDir
         if ($uploadRc -ne 0) {
             Write-Log ("  ! Report share exited with code " + $uploadRc + "; local findings remain available.") "Yellow"
             $script:RunExitCode = 1
         }
-    } else {
+    } elseif ($NoReportShare) {
         Write-Log "  Report share disabled by caller; the final report step will share once." "Gray"
+    } else {
+        Write-Log "  Report not shared (nothing uploaded). Re-run with -ShareReport to share it." "Gray"
     }
     Write-Host ""
 

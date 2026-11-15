@@ -29,6 +29,16 @@ $snapText = Get-Content -LiteralPath $snap -Raw
 Check 'LocalAccounts: group resolved from S-1-5-32-544' ($snapText -match 'S-1-5-32-544')
 Check 'LocalAccounts: no hard-coded English group name left in the queries' ($snapText -notmatch "Name=`"Administrators`"" -and $snapText -notmatch 'net localgroup Administrators')
 
+# ---- PID map (optimization) ----
+. ([scriptblock]::Create((Get-FunctionText $snap @('Test-IsAdmin', 'Get-ProcessInfoMap'))))
+$script:ProcessInfoMap = $null
+$m1 = Get-ProcessInfoMap; $m2 = Get-ProcessInfoMap
+Check 'PID map: built once and reused' ([object]::ReferenceEquals($m1, $m2) -and $m1.ByPid.ContainsKey([int]$PID) -and $m1.ByPid[[int]$PID].Name)
+$connBody = ([regex]::Match($snapText, '(?s)function Get-ConnectionsSection \{.*?\r?\n\}\r?\n')).Value
+Check 'Connections: no Get-Process per connection' ($connBody -and $connBody -notmatch 'Get-Process\b')
+$procBody = ([regex]::Match($snapText, '(?s)function Get-ProcessesSection \{.*?\r?\n\}\r?\n')).Value
+Check 'Processes: owner comes from the PID map when elevated' ($procBody -match 'HaveOwners')
+
 
 if ($failures -gt 0) { Write-Host "$failures check(s) failed"; exit 1 }
-Write-Host 'All snapshot admin-SID checks passed.'
+Write-Host 'All snapshot admin-SID / PID-map checks passed.'

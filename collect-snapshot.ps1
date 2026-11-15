@@ -449,21 +449,53 @@ function Get-StartupFoldersSection {
 # ---------------------------------------------------------------------------
 # Processes
 # ---------------------------------------------------------------------------
+$script:ProcessInfoMap = $null
+
+function Get-ProcessInfoMap {
+    # ONE Get-Process call, built once per process: PID -> @{ Name; Owner }.
+    # Replaces a Get-Process per connection and (when elevated) the
+    # GetOwner CIM call per process (~150 ms each, over a minute on a PC with
+    # 450 processes). Owner is $null when -IncludeUserName is not allowed
+    # (not elevated); the caller then falls back to GetOwner.
+    param([switch]$Refresh)
+    if ($null -ne $script:ProcessInfoMap -and -not $Refresh) { return $script:ProcessInfoMap }
+    $map = @{}
+    $haveOwners = $false
+    $list = $null
+    if (Test-IsAdmin) {
+        try { $list = @(Get-Process -IncludeUserName -ErrorAction Stop); $haveOwners = $true } catch { $list = $null }
+    }
+    if ($null -eq $list) { try { $list = @(Get-Process -ErrorAction Stop) } catch { $list = @() } }
+    foreach ($q in $list) {
+        $o = $null
+        if ($haveOwners) { $o = [string]$q.UserName }
+        $map[[int]$q.Id] = @{ Name = [string]$q.ProcessName; Owner = $o }
+    }
+    $script:ProcessInfoMap = @{ ByPid = $map; HaveOwners = $haveOwners }
+    return $script:ProcessInfoMap
+}
+
 function Get-ProcessesSection {
     $procs = Get-CimInstance -ClassName Win32_Process -ErrorAction Stop
+    $info = Get-ProcessInfoMap
     $rows = foreach ($p in $procs) {
         $owner = ''
-        try {
-            $ownerInfo = Invoke-CimMethod -InputObject $p -MethodName GetOwner -ErrorAction Stop
-            if ($ownerInfo -and $ownerInfo.ReturnValue -eq 0) {
-                if ($ownerInfo.Domain) {
-                    $owner = "$($ownerInfo.Domain)\$($ownerInfo.User)"
-                } else {
-                    $owner = ConvertTo-NullSafeString $ownerInfo.User
+        if ($info.HaveOwners) {
+            $known = $info.ByPid[[int]$p.ProcessId]
+            if ($known -and $known.Owner) { $owner = $known.Owner }
+        } else {
+            try {
+                $ownerInfo = Invoke-CimMethod -InputObject $p -MethodName GetOwner -ErrorAction Stop
+                if ($ownerInfo -and $ownerInfo.ReturnValue -eq 0) {
+                    if ($ownerInfo.Domain) {
+                        $owner = "$($ownerInfo.Domain)\$($ownerInfo.User)"
+                    } else {
+                        $owner = ConvertTo-NullSafeString $ownerInfo.User
+                    }
                 }
+            } catch {
+                $owner = ''
             }
-        } catch {
-            $owner = ''
         }
 
         $created = ''
@@ -492,14 +524,11 @@ function Get-ProcessesSection {
 # ---------------------------------------------------------------------------
 function Get-ConnectionsSection {
     $conns = Get-NetTCPConnection -ErrorAction Stop
+    $byPid = (Get-ProcessInfoMap).ByPid
     $rows = foreach ($c in $conns) {
         $procName = ''
-        try {
-            $proc = Get-Process -Id $c.OwningProcess -ErrorAction Stop
-            $procName = $proc.ProcessName
-        } catch {
-            $procName = ''
-        }
+        $known = $byPid[[int]$c.OwningProcess]
+        if ($known) { $procName = $known.Name }
         $localAddr = ConvertTo-NullSafeString $c.LocalAddress
         $remoteAddr = ConvertTo-NullSafeString $c.RemoteAddress
         [PSCustomObject]@{

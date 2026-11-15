@@ -21,9 +21,15 @@
     (Start Menu entries + install folder + temp folder) and MOVES it to a
     quarantine folder under <LogDir>\av-uninstall-quarantine - never deleted,
     every move logged in the results JSON. Disable with -NoLeftoverSweep.
+    The sweep runs only when the uninstaller window closed AND the product's
+    HKLM uninstall key is really gone afterwards (a refused or cancelled
+    uninstall leaves the product in place, so nothing is swept), and it
+    matches folder/shortcut names EXACTLY (a "Typeset" folder is never an
+    ESET leftover).
 
     What it does:
-      1. enumerate 64-bit + 32-bit HKLM (and HKCU) Uninstall keys,
+      1. enumerate 64-bit + 32-bit HKLM Uninstall keys (never HKCU: any
+         process running as the signed-in user can write an entry there),
       2. keep entries that look like a security/AV product (DisplayName match
          against a known-vendor heuristic, but exclude Windows Defender / MSRT
          / Windows components - those are OS, not "installed AV"),
@@ -93,9 +99,11 @@ function Get-RegValue {
 function Get-InstalledAv {
     $keys = @(
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
-        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
-        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
     )
+    # HKCU is deliberately NOT read: it is writable by the signed-in user, and
+    # this script runs elevated, so an HKCU entry could make it launch any
+    # program as administrator.
     $found = @()
     foreach ($key in $keys) {
         if (-not (Test-Path $key)) { continue }
@@ -115,6 +123,7 @@ function Get-InstalledAv {
                 Publisher           = Get-RegValue $p 'Publisher'
                 Version             = Get-RegValue $p 'DisplayVersion'
                 RegistryKey         = $key
+                RegistryPath        = Get-RegValue $p 'PSPath'
             }
         }
     }
@@ -146,7 +155,9 @@ function Test-AllowedAvPath {
     $roots = @()
     if ($env:ProgramFiles) { $roots += $env:ProgramFiles }
     if (${env:ProgramFiles(x86)}) { $roots += ${env:ProgramFiles(x86)} }
-    if ($env:ProgramData) { $roots += $env:ProgramData }
+    # Only the Windows Installer / Burn package cache under ProgramData.
+    # The rest of ProgramData is creatable by standard users.
+    if ($env:ProgramData) { $roots += (Join-Path $env:ProgramData 'Package Cache') }
     foreach ($root in $roots) {
         if (Test-PathContained -Root $root -Candidate $candidate) { return $true }
     }
@@ -316,6 +327,44 @@ function Open-Uninstaller {
 }
 
 # --- leftover sweep --------------------------------------------------------
+function Get-LeftoverNames {
+    # The exact folder / shortcut names that count as this product's leftovers:
+    # the vendor keyword (e.g. "ESET", "Malwarebytes") and the full DisplayName.
+    param($Product, [string]$Keyword)
+    $names = @()
+    foreach ($n in @($Keyword, [string]$Product.DisplayName)) {
+        if ([string]::IsNullOrWhiteSpace($n)) { continue }
+        $n = $n.Trim()
+        if ($names -notcontains $n) { $names += $n }
+    }
+    return $names
+}
+
+function Test-LeftoverNameMatch {
+    # Exact, case-insensitive name match. A shortcut file also matches on its
+    # name without the extension ("Malwarebytes.lnk" -> "Malwarebytes").
+    param($Item, [string[]]$Names)
+    if ($null -eq $Item) { return $false }
+    foreach ($n in $Names) {
+        if ([string]::Equals([string]$Item.Name, $n, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+        if (-not $Item.PSIsContainer) {
+            $base = [System.IO.Path]::GetFileNameWithoutExtension([string]$Item.Name)
+            if ([string]::Equals($base, $n, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+        }
+    }
+    return $false
+}
+
+function Test-UninstallEntryGone {
+    # True only when the product's own HKLM uninstall key existed and is now
+    # gone. No recorded key (explicit -ToolPath mode) means "cannot verify".
+    param($Product)
+    $path = $null
+    if ($Product -and $Product.PSObject.Properties['RegistryPath']) { $path = [string]$Product.RegistryPath }
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    return (-not (Test-Path -LiteralPath $path))
+}
+
 # Vendor uninstallers sometimes "don't seem to work" (observed live with ESET)
 # and leave Start Menu shortcuts + the install folder behind. Sweep whatever
 # still matches the product keyword and MOVE it to quarantine (never delete -
@@ -330,6 +379,10 @@ function Clear-ProductLeftovers {
     }
     if (-not $kw) { return $moves }
 
+    # Leftovers are matched by EXACT name (case-insensitive), never by
+    # substring or wildcard: "*ESET*" would also match "Typeset".
+    $names = @(Get-LeftoverNames -Product $Product -Keyword $kw)
+
     $targets = New-Object System.Collections.ArrayList
 
     # 1) Start Menu entries (all-users + current user) matching the keyword.
@@ -338,7 +391,7 @@ function Clear-ProductLeftovers {
     if ($env:APPDATA) { $smRoots += (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs') }
     foreach ($sm in $smRoots) {
         if (-not (Test-Path -LiteralPath $sm)) { continue }
-        foreach ($item in (Get-ChildItem -LiteralPath $sm -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -like ("*" + $kw + "*") })) {
+        foreach ($item in (Get-ChildItem -LiteralPath $sm -Force -ErrorAction SilentlyContinue | Where-Object { Test-LeftoverNameMatch -Item $_ -Names $names })) {
             if (-not $targets.Contains($item.FullName)) { [void]$targets.Add($item.FullName) }
         }
     }
@@ -349,14 +402,14 @@ function Clear-ProductLeftovers {
     if ($registryInstall -and (Test-Path -LiteralPath $registryInstall) -and (Test-AllowedAvPath -Path $registryInstall)) {
         [void]$targets.Add($registryInstall)
     } elseif ($registryInstall -and (Test-Path -LiteralPath $registryInstall)) {
-        Say ("  Refusing registry InstallLocation outside Program Files/ProgramData: " + $registryInstall) 'Yellow'
+        Say ("  Refusing registry InstallLocation outside Program Files / ProgramData\Package Cache: " + $registryInstall) 'Yellow'
     } else {
         $pfRoots = @()
         if ($env:ProgramFiles) { $pfRoots += $env:ProgramFiles }
         if (${env:ProgramFiles(x86)}) { $pfRoots += ${env:ProgramFiles(x86)} }
         foreach ($pf in $pfRoots) {
             if (-not (Test-Path -LiteralPath $pf)) { continue }
-            foreach ($d in (Get-ChildItem -LiteralPath $pf -Directory -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -like ("*" + $kw + "*") })) {
+            foreach ($d in (Get-ChildItem -LiteralPath $pf -Directory -Force -ErrorAction SilentlyContinue | Where-Object { Test-LeftoverNameMatch -Item $_ -Names $names })) {
                 if (-not $targets.Contains($d.FullName)) { [void]$targets.Add($d.FullName) }
             }
         }
@@ -364,7 +417,7 @@ function Clear-ProductLeftovers {
 
     # 3) Temp folder matching the keyword (e.g. "ESET Online Scanner" runtime dir).
     if ($env:TEMP -and (Test-Path -LiteralPath $env:TEMP)) {
-        foreach ($d in (Get-ChildItem -LiteralPath $env:TEMP -Directory -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -like ("*" + $kw + "*") })) {
+        foreach ($d in (Get-ChildItem -LiteralPath $env:TEMP -Directory -Force -ErrorAction SilentlyContinue | Where-Object { Test-LeftoverNameMatch -Item $_ -Names $names })) {
             if (-not $targets.Contains($d.FullName)) { [void]$targets.Add($d.FullName) }
         }
     }
@@ -412,16 +465,27 @@ else { $quarantineRoot = Join-Path 'C:\RIT-SCC' 'av-uninstall-quarantine' }
 function Invoke-WithSweep {
     param($Product)
     $r = Open-Uninstaller $Product
-    if (-not $NoLeftoverSweep) {
-        $moves = @(Clear-ProductLeftovers -Product $Product -QuarantineRoot $quarantineRoot)
-        if ($moves.Count -gt 0) {
-            $r | Add-Member -NotePropertyName 'LeftoversMoved' -NotePropertyValue $moves.Count -Force
-            $r | Add-Member -NotePropertyName 'Leftovers' -NotePropertyValue $moves -Force
-            Say ("  Leftover sweep: " + $moves.Count + " item(s) moved to quarantine under:") 'Yellow'
-            Say ("    " + $quarantineRoot) 'DarkGray'
-            foreach ($m in $moves) {
-                Say ("    - " + $m.Source + "  [" + $m.Status + "]") 'DarkGray'
-            }
+    if ($NoLeftoverSweep) { return $r }
+    $sweepSkip = $null
+    if ([string]$r.Status -ne 'ClosedByUser') {
+        $sweepSkip = 'uninstaller did not complete (' + [string]$r.Status + ')'
+    } elseif (-not (Test-UninstallEntryGone -Product $Product)) {
+        $sweepSkip = 'the product is still registered as installed (uninstall refused, cancelled or unverifiable)'
+    }
+    if ($sweepSkip) {
+        $r | Add-Member -NotePropertyName 'LeftoverSweep' -NotePropertyValue ('Skipped: ' + $sweepSkip) -Force
+        Say ("  Leftover sweep skipped: " + $sweepSkip) 'Yellow'
+        return $r
+    }
+    $r | Add-Member -NotePropertyName 'LeftoverSweep' -NotePropertyValue 'Ran' -Force
+    $moves = @(Clear-ProductLeftovers -Product $Product -QuarantineRoot $quarantineRoot)
+    if ($moves.Count -gt 0) {
+        $r | Add-Member -NotePropertyName 'LeftoversMoved' -NotePropertyValue $moves.Count -Force
+        $r | Add-Member -NotePropertyName 'Leftovers' -NotePropertyValue $moves -Force
+        Say ("  Leftover sweep: " + $moves.Count + " item(s) moved to quarantine under:") 'Yellow'
+        Say ("    " + $quarantineRoot) 'DarkGray'
+        foreach ($m in $moves) {
+            Say ("    - " + $m.Source + "  [" + $m.Status + "]") 'DarkGray'
         }
     }
     return $r
@@ -458,7 +522,7 @@ if ($ToolPath) {
     $prod = [pscustomobject]@{
         DisplayName = if ($DisplayName) { $DisplayName } else { (Split-Path -Leaf $ToolPath) }
         UninstallString = $ToolPath
-        QuietUninstallString = $null; Publisher = $null; Version = $null; RegistryKey = $null
+        QuietUninstallString = $null; Publisher = $null; Version = $null; RegistryKey = $null; RegistryPath = $null
     }
     if ($ListOnly) {
         Say ("Would open: " + $prod.DisplayName) 'Cyan'

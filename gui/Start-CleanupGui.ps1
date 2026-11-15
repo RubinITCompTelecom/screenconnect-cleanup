@@ -1216,24 +1216,33 @@ $timer.add_Tick({
 
 $win.add_Closing({
         param($s, $e)
-        if ($script:Child -and -not $script:Child.Finished) {
-            if ($script:CloseLock) {
-                [void][System.Windows.MessageBox]::Show('Removal or an uninstall is in progress. Closing now can leave the PC half cleaned. Wait for this step to finish.', 'ScreenConnect Cleanup', 'OK', 'Warning')
-                $e.Cancel = $true
-                return
+        # A message box pumps messages, so the 250 ms timer would keep ticking under it: a step could end,
+        # the next one start and its prompt dialogs open behind this box. Pause the timer while the box is
+        # up and start it again only when the close is cancelled.
+        $timerWasOn = $timer.IsEnabled
+        $timer.Stop()
+        try {
+            if ($script:Child -and -not $script:Child.Finished) {
+                if ($script:CloseLock) {
+                    [void][System.Windows.MessageBox]::Show('Removal or an uninstall is in progress. Closing now can leave the PC half cleaned. Wait for this step to finish.', 'ScreenConnect Cleanup', 'OK', 'Warning')
+                    $e.Cancel = $true
+                    return
+                }
+                # A scanner the technician is driving is left open when the window closes (design 7):
+                # only the step's own powershell.exe is ended, never the scanner it started.
+                $isScanner = ($script:Action -and @('6a', '6b', '6c') -contains $script:Action.StepId)
+                if (-not $script:AutoStart) {
+                    $q = $(if ($isScanner) { 'A scanner is still open. Close this window? The scanner window stays open; finish or close it yourself.' } else { 'A step is still running. Stop it and close? (Nothing has been approved for removal in this step yet.)' })
+                    $ans = [System.Windows.MessageBox]::Show($q, 'ScreenConnect Cleanup', 'YesNo', 'Question')
+                    if ($ans -ne 'Yes') { $e.Cancel = $true; return }
+                }
+                if ($isScanner) { Stop-GuiChild $script:Child -KeepDescendants } else { Stop-GuiChild $script:Child }
+            } elseif ($script:Action -and $script:Action.Kind -eq 'Ask' -and -not $script:AutoStart) {
+                $ans = [System.Windows.MessageBox]::Show('The run is waiting for your choice. Close the window? Nothing has been changed by this step yet.', 'ScreenConnect Cleanup', 'YesNo', 'Question')
+                if ($ans -ne 'Yes') { $e.Cancel = $true }
             }
-            # A scanner the technician is driving is left open when the window closes (design 7):
-            # only the step's own powershell.exe is ended, never the scanner it started.
-            $isScanner = ($script:Action -and @('6a', '6b', '6c') -contains $script:Action.StepId)
-            if (-not $script:AutoStart) {
-                $q = $(if ($isScanner) { 'A scanner is still open. Close this window? The scanner window stays open; finish or close it yourself.' } else { 'A step is still running. Stop it and close? (Nothing has been approved for removal in this step yet.)' })
-                $ans = [System.Windows.MessageBox]::Show($q, 'ScreenConnect Cleanup', 'YesNo', 'Question')
-                if ($ans -ne 'Yes') { $e.Cancel = $true; return }
-            }
-            if ($isScanner) { Stop-GuiChild $script:Child -KeepDescendants } else { Stop-GuiChild $script:Child }
-        } elseif ($script:Action -and $script:Action.Kind -eq 'Ask' -and -not $script:AutoStart) {
-            $ans = [System.Windows.MessageBox]::Show('The run is waiting for your choice. Close the window? Nothing has been changed by this step yet.', 'ScreenConnect Cleanup', 'YesNo', 'Question')
-            if ($ans -ne 'Yes') { $e.Cancel = $true }
+        } finally {
+            if ($timerWasOn -and $e.Cancel) { $timer.Start() }
         }
     })
 

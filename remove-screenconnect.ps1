@@ -1910,6 +1910,10 @@ foreach ($inst in $scInstancesArray) {
                 Write-Log "  PRODUCT VERIFICATION FAILED for ${instanceId}: $why" 'Error'
                 Add-ManifestEntry -InstanceId $instanceId -Action 'ProductVerification' -Target 'N/A' -Result 'PRODUCT_VERIFICATION_FAILED' -Details "Entry skipped, never uninstalled. Reasons: $why"
                 Update-ResumeStatus -InstanceId $instanceId -Status 'PRODUCT_VERIFICATION_FAILED'
+                # An instance the plan asked to remove was left in place: the
+                # run did NOT do what was approved, so it must not exit 0 (the
+                # wrapper would otherwise print "Removal completed").
+                $overallSuccess = $false
                 continue
             }
             Write-Log "  Product verification passed"
@@ -2409,6 +2413,11 @@ Write-Log "Manifest: $manifestPath"
 
 if ($failedCount -gt 0) {
     Write-Log "WARNING: Some actions failed. Check manifest for details." 'Warn'
+    $overallSuccess = $false
+}
+
+if ($verifFailCount -gt 0) {
+    Write-Log "WARNING: $verifFailCount instance(s) could not be verified as ScreenConnect and were NOT removed." 'Warn'
     $overallSuccess = $false
 }
 

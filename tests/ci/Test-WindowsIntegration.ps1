@@ -89,13 +89,15 @@ $workDir = Join-Path $tmp 'workdir'
 New-Item -ItemType Directory -Path $workDir -Force | Out-Null
 
 $remover = Join-Path $repoRoot 'remove-screenconnect.ps1'
-# DRY-RUN (no -Execute). Process exit must be 0 or 1 (1 = dry-run records
-# 'Failed' for absent services on a bare runner, still inert). It must NEVER
-# be any crash, and crucially must write a manifest proving verification gated
-# the smuggled AnyDesk entry.
+# DRY-RUN (no -Execute). It must NEVER crash, and crucially must write a
+# manifest proving verification gated the smuggled AnyDesk entry. Because the
+# plan asked to remove an entry that was then refused by product verification
+# (code review 2026-11-12, item 3), the run did not do what was approved and
+# must exit exactly 1 - never 0, which the review wrapper would report as
+# "Removal completed".
 & $remover -PlanJson $planJson -WorkDir $workDir -NoRestorePoint
 $rc = $LASTEXITCODE
-Check 'removal dry-run exit code sane (0 or 1)' ($rc -eq 0 -or $rc -eq 1) "rc=$rc"
+Check 'removal dry-run with a refused entry exits 1 (not 0)' ($rc -eq 1) "rc=$rc"
 
 $manifestPath = Join-Path $workDir 'removal-manifest.json'
 Check 'removal-manifest.json written by dry-run' (Test-Path -LiteralPath $manifestPath)

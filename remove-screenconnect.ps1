@@ -637,6 +637,23 @@ function Get-EntryPropertySafe {
     return $null
 }
 
+function Get-MsiProductCode {
+    # Returns the MSI ProductCode WITH braces (e.g. '{0A1B...}', upper-case) when
+    # $Command is an msiexec uninstall/modify string, else $null. Accepts the
+    # standard "MsiExec.exe /X{GUID}", "/X {GUID}", "/I{GUID}", a quoted or
+    # full msiexec path, and lower-case GUIDs. The caller never runs this text;
+    # it only reuses the validated ProductCode.
+    param([string]$Command)
+    if ([string]::IsNullOrWhiteSpace($Command)) { return $null }
+    $m = [regex]::Match($Command, '(?i)msiexec(?:\.exe)?"?\s.*?/[xi]\s*(\{[0-9a-f-]{36}\})')
+    if (-not $m.Success) { return $null }
+    $code = $m.Groups[1].Value.ToUpperInvariant()
+    # Exact GUID shape 8-4-4-4-12 (the character class above alone would also
+    # accept 36 dashes).
+    if ($code -notmatch '^\{[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\}$') { return $null }
+    return $code
+}
+
 function Get-PlanInstanceId {
     param($Instance)
     foreach ($name in @('InstanceId', 'Identifier', 'Key')) {
@@ -1368,23 +1385,21 @@ function Run-VendorUninstaller {
         return $null
     }
 
-    # Check if MSI
-    if ($cmd -match '/x\s+\{([A-F0-9-]{36})\}' -or $cmd -match 'msiexec.*/x\s+(\{[A-F0-9-]{36}\})') {
+    # Check if MSI. The standard form is "MsiExec.exe /X{GUID}" (no space) and
+    # some registrations use /I{GUID} (modify/repair entry point); both resolve
+    # to the same ProductCode, which is always run as "/x {GUID}" below.
+    $productCode = Get-MsiProductCode -Command $cmd
+    if ($productCode) {
         $isMsi = $true
-        $productCode = $matches[1]
         Write-Log "  Detected MSI uninstaller, ProductCode: $productCode"
     }
 
     # Build the actual command line
     $finalCmd = $cmd
     if ($isMsi) {
-        # Ensure quiet uninstall flags
-        if ($finalCmd -notmatch '/qn') {
-            $finalCmd = $finalCmd + ' /qn'
-        }
-        if ($finalCmd -notmatch '/norestart') {
-            $finalCmd = $finalCmd + ' /norestart'
-        }
+        # The command actually run: msiexec.exe with the validated ProductCode
+        # and fixed quiet flags - never the registry text itself.
+        $finalCmd = 'msiexec.exe /x ' + $productCode + ' /qn /norestart'
     } else {
         # For non-MSI, try to add common silent flags if not present
         if ($finalCmd -notmatch '/s' -and $finalCmd -notmatch '/quiet' -and $finalCmd -notmatch '/silent') {
@@ -1416,7 +1431,7 @@ function Run-VendorUninstaller {
             # MSI: run msiexec.exe directly with the validated ProductCode.
             # /qn /norestart are fixed flags we control, not registry text.
             $psi.FileName = "$env:SystemRoot\System32\msiexec.exe"
-            $psi.Arguments = '/x ' + $productCode + ' /qn /norestart'
+            $psi.Arguments = '/x ' + $productCode + ' /qn /norestart'   # $productCode keeps its braces
             $runDirect = $true
         } else {
             # Non-MSI: only run if the executable leaf is an allowlisted,
@@ -1441,11 +1456,14 @@ function Run-VendorUninstaller {
                 Write-Log "  Running vendor uninstaller directly (no shell): $bareExe"
             } else {
                 # Fail-closed: a string we cannot validate is never executed by
-                # shell. Record it and fall back to manual surgery + quarantine.
+                # shell. Nothing was attempted, so this is 'Skipped' (not
+                # 'Failed'): manual surgery + quarantine handle the instance and
+                # its own postconditions decide success. Return $null so the
+                # caller records the fallback decision without a second failure.
                 $psi = $null
                 Write-Log "  REFUSING to run unvalidated UninstallString via cmd.exe (not an allowlisted ScreenConnect/MSI uninstaller). Manual surgery will handle this instance." 'Warn'
-                Add-ManifestEntry -InstanceId $InstanceId -Action 'Uninstall' -Target $displayName -Result 'Failed' -Details "UninstallString not validated (not MSI / not an allowlisted executable under the verified install dir); manual surgery fallback. Raw string (logged, NOT executed): $finalCmd"
-                return $false
+                Add-ManifestEntry -InstanceId $InstanceId -Action 'Uninstall' -Target $displayName -Result 'Skipped' -Details "UninstallString not validated (not MSI / not an allowlisted executable under the verified install dir); manual surgery fallback. Raw string (logged, NOT executed): $finalCmd"
+                return $null
             }
         }
 
@@ -2039,7 +2057,8 @@ foreach ($inst in $scInstancesArray) {
                 $uninstallSucceeded = $true
                 Write-Log "  Vendor uninstaller reported success"
             } elseif ($null -eq $uninstallResult) {
-                # Nothing was attempted (no uninstall string / no entry); the
+                # Nothing was attempted (no uninstall string / no entry / an
+                # uninstall string that failed validation and was refused); the
                 # truthful Skipped entry is already in the manifest. Record the
                 # DECISION here with a real target, never an empty one, and
                 # never as 'Failed' - a run whose manual surgery succeeds must
@@ -2050,7 +2069,7 @@ foreach ($inst in $scInstancesArray) {
                 Add-ManifestEntry -InstanceId $instanceId -Action 'UninstallFallback' -Target $fallbackTarget -Result 'Planned' -Details 'No vendor uninstaller available; proceeding with manual surgery + quarantine'
             } else {
                 # Genuine failure - the reason entry (exit code / timeout /
-                # validation refusal) is already recorded. Record the decision
+                # exception) is already recorded. Record the decision
                 # with a real target.
                 Write-Log "  Vendor uninstaller failed - proceeding with manual surgery" 'Warn'
                 $fallbackTarget = Get-EntryPropertySafe -Instance $uninstallEntry -PropertyName 'DisplayName'

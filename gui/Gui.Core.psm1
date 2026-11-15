@@ -287,6 +287,15 @@ function Resolve-GuiListToken {
             if (Test-Path -LiteralPath $f -PathType Leaf) { return @('-RemovalManifest', $f) }
             return @()
         }
+        # Report evidence flags (batch SCC_POWER_ARG / SCC_SCAN_ARG): the repair result only when the
+        # repair left one (declined = section omitted), and scanner status = Malwarebytes result or "skipped".
+        'PowerArg'   { $f = $Session.RunRoot + '/power-options-repair.json';  if (Test-Path -LiteralPath $f -PathType Leaf) { return @('-PowerOptionsRepair', $f) }; return @() }
+        'PowerArgBs' { $f = $Session.RunRoot + '\power-options-repair.json'; if (Test-Path -LiteralPath $f -PathType Leaf) { return @('-PowerOptionsRepair', $f) }; return @() }
+        'ScannerArgs' {
+            $f = $Session.RunRoot + '\logs\scanner-Malwarebytes-result.json'
+            if (Test-Path -LiteralPath $f -PathType Leaf) { return @('-ScannerSummary', $f) }
+            return @('-ScannersSkipped')
+        }
         'GpoArgs' { if ([bool]$Session.Answers['ResetGpo']) { return @('-ResetLocalGpo') }; return @() }
         'ReportArg' {
             $f = (Get-GuiShareTargets -Session $Session).Report

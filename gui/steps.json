@@ -151,7 +151,7 @@
                    "-PersistenceInventory", "{RunRoot}\\persistence\\inventory.json",
                    "-PersistenceRemoval", "{RunRoot}\\persistence\\removal.json",
                    "-PersistenceResult", "{RunRoot}\\persistence\\result.json",
-                   "-PowerOptionsRepair", "{RunRoot}/power-options-repair.json",
+                   "{@PowerArg}", "{@ScannerArgs}",
                    "-OutputPath", "{RunRoot}/report.html"],
           "When": ["Has:FindingsJson", "Exists:{FindingsJson}"], "SkipText": "No current-run findings.json available - the report is skipped.",
           "After": "MarkReport", "OnNonZero": "WarnPipe", "NonZeroText": "Report generation failed." }
@@ -188,7 +188,7 @@
                    "-PersistenceInventory", "{RunRoot}\\after-scans\\persistence\\inventory.json",
                    "-PersistenceRemoval", "{RunRoot}\\after-scans\\persistence\\removal.json",
                    "-PersistenceResult", "{RunRoot}\\after-scans\\persistence\\result.json",
-                   "-PowerOptionsRepair", "{RunRoot}\\power-options-repair.json",
+                   "{@PowerArgBs}", "{@ScannerArgs}",
                    "-OutputPath", "{RunRoot}\\report-after-scans.html"],
           "When": ["Not:ScannerOnly", "Has:FindingsJson", "Exists:{RunRoot}\\after-scans\\persistence\\result.json"],
           "SkipText": "No after-scans persistence result: the offline report is shared as it is.",

@@ -577,9 +577,18 @@ function Get-LocalAccountsSection {
     $rows = New-Object System.Collections.Generic.List[object]
 
     $adminMembers = @{}
+    # The Administrators group is localized ("Administratoren", ...); find it by
+    # its well-known SID S-1-5-32-544, never by the English name.
+    $adminGroupName = 'Administrators'
+    try {
+        $adminGroupName = (New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')).Translate([Security.Principal.NTAccount]).Value.Split([char]92)[-1]
+    } catch {
+        Add-CollectionWarning -Section 'LocalAccounts' -WarningText "Administrators group name lookup by SID failed, assuming 'Administrators': $($_.Exception.Message)"
+    }
+    $adminGroupPattern = 'Name="' + [regex]::Escape($adminGroupName) + '"'
     try {
         $members = Get-CimInstance -ClassName Win32_GroupUser -ErrorAction Stop | Where-Object {
-            $_.GroupComponent -match 'Name="Administrators"'
+            $_.GroupComponent -match $adminGroupPattern
         }
         foreach ($m in $members) {
             if ($m.PartComponent -match 'Name="([^"]+)"') {
@@ -590,7 +599,7 @@ function Get-LocalAccountsSection {
         # Fall back to net localgroup parsing if the CIM association query
         # is unavailable (some builds require different WMI plumbing).
         try {
-            $netOut = & net localgroup Administrators 2>$null
+            $netOut = & net localgroup $adminGroupName 2>$null
             $inList = $false
             foreach ($line in $netOut) {
                 if ($line -match '^-+$') { $inList = $true; continue }

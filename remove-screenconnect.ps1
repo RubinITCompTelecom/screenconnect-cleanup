@@ -1730,7 +1730,20 @@ function Remove-ResumeTask {
 # Persistence cleanup (scheduled tasks, Run keys, WMI subscriptions)
 # -----------------------------------------------------------------------------
 function Clean-Persistence {
-    param([string]$InstallDir, [string]$InstanceId)
+    # -RunKeys exists so tests can point the Run-key sweep at a throwaway key;
+    # production callers always use the default list.
+    param(
+        [string]$InstallDir,
+        [string]$InstanceId,
+        [string[]]$RunKeys = @(
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
+            'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
+            'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run',
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce'
+        )
+    )
     $InstallDir = Expand-Env $InstallDir
     $cleaned = 0
     $failed = $false
@@ -1751,7 +1764,26 @@ function Clean-Persistence {
                         $args = Get-EntryPropertySafe -Instance $action -PropertyName 'Arguments'
                         if ($path) { $path = Expand-Env ([string]$path) }
                         if ($args) { $args = Expand-Env ([string]$args) }
-                        $pathReferences = $path -and (Test-PathContained -Root $InstallDir -Candidate $path)
+                        # String-only match, like the Run-key branch: by the
+                        # time persistence is cleaned the install folder has
+                        # usually been quarantined, and Test-PathContained
+                        # returns false for a root that no longer exists, so
+                        # a task launching the ScreenConnect exe survived.
+                        # Execute is a single path, so it is normalised
+                        # lexically (GetFullPath does not touch the disk; '..'
+                        # cannot walk a match out of the folder) and must sit
+                        # under the install folder itself, not a sibling that
+                        # merely shares its name as a prefix.
+                        $pathReferences = $false
+                        if ($path) {
+                            try {
+                                $execFull = [System.IO.Path]::GetFullPath(([string]$path).Trim().Trim('"'))
+                                $dirFull = [System.IO.Path]::GetFullPath(([string]$InstallDir).Trim().Trim('"')).TrimEnd([char[]]@([char]92, [char]47))
+                                $pathReferences = $execFull.StartsWith($dirFull + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
+                            } catch {
+                                $pathReferences = $false
+                            }
+                        }
                         $argsReferences = $args -and (Test-LiteralPathReference -Text $args -Path $InstallDir)
                         if ($pathReferences -or $argsReferences) {
                             $taskName = $task.TaskName
@@ -1783,15 +1815,7 @@ function Clean-Persistence {
     }
 
     # 2. Registry Run/RunOnce keys
-    $runKeys = @(
-        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
-        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
-        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
-        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
-        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run',
-        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce'
-    )
-    foreach ($rk in $runKeys) {
+    foreach ($rk in @($RunKeys)) {
         if (-not (Test-Path -LiteralPath $rk)) { continue }
         try {
             $vals = Get-ItemProperty -LiteralPath $rk -ErrorAction SilentlyContinue

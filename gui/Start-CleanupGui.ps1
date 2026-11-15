@@ -781,6 +781,8 @@ function Set-PreviewMode {
 function Start-Run {
     param([string]$ModeName)
     $script:Finished = $false
+    # A second run in the same window must never show the previous run's paste link.
+    $script:ShareUrl = ''
     # The share tick box (Online only, ticked by default). Test hook: a canned "ShareReport" answer stands in for it.
     $share = [bool]$ui.CbShare.IsChecked
     $ta = Get-TestAnswer 'ShareReport'
@@ -1178,6 +1180,7 @@ $ui.BtnStart.add_Click({ Start-Run (Get-SelectedMode) })
 $ui.BtnReviewContinue.add_Click({ Complete-Review })
 $ui.BtnNewRun.add_Click({
         $script:Session = $null; $script:Action = $null; $script:Child = $null; $script:LogPath = ''; $script:Finished = $false
+        $script:ShareUrl = ''
         $ui.RunText.Text = 'Run folder: none yet'
         Set-PreviewMode (Get-SelectedMode); Update-HeaderButtons; Show-Panel 'Start'
     })

@@ -81,6 +81,16 @@ try {
         $decorated=Get-SccGenericEvidence -Name 'Decorated' -Collector {Get-Content -LiteralPath $hostsFixture | Where-Object {$_ -and $_ -notmatch '^\s*#'}}
         $decoratedJson=ConvertTo-Json -InputObject ([pscustomobject]@{Items=$decorated.Items}) -Depth 12 -Compress
         if($decorated.Items.Count -ne 1 -or $decoratedJson.Length -gt 200){throw ('Get-Content string was not flattened: '+$decoratedJson.Length+' chars')}
+        # Review #22: WMI consumers keep their class and command/script body.
+        $wmi=Get-SccGenericEvidence -Name 'WmiFixture' -Collector {
+            ConvertTo-SccWmiSubscriptionRow ([pscustomobject]@{CimClass=[pscustomobject]@{CimClassName='ActiveScriptEventConsumer'};Name='Updater';ScriptingEngine='VBScript';ScriptText='CreateObject("WScript.Shell").Run "x"';ScriptFileName=''})
+            ConvertTo-SccWmiSubscriptionRow ([pscustomobject]@{CimClass=[pscustomobject]@{CimClassName='CommandLineEventConsumer'};Name='Cmd';CommandLineTemplate='powershell -enc AAA';ExecutablePath='C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'})
+            ConvertTo-SccWmiSubscriptionRow ([pscustomobject]@{'__CLASS'='__EventFilter';Name='Filt';Query='SELECT * FROM __InstanceModificationEvent';QueryLanguage='WQL'})
+        }
+        if($wmi.Errors.Count -or $wmi.Items.Count -ne 3){throw 'WMI fixture rows were not collected'}
+        if($wmi.Items[0].'__CLASS' -ne 'ActiveScriptEventConsumer' -or $wmi.Items[0].ScriptingEngine -ne 'VBScript' -or $wmi.Items[0].ScriptText -notmatch 'WScript\.Shell'){throw 'ActiveScript consumer lost its class or script body'}
+        if($wmi.Items[1].'__CLASS' -ne 'CommandLineEventConsumer' -or $wmi.Items[1].CommandLineTemplate -ne 'powershell -enc AAA' -or $wmi.Items[1].ExecutablePath -notlike '*powershell.exe'){throw 'CommandLine consumer lost its class or command'}
+        if($wmi.Items[2].'__CLASS' -ne '__EventFilter' -or $wmi.Items[2].Query -notlike 'SELECT*'){throw 'event filter lost its class or query'}
         # Review #21: the logon-type filter is part of the event-log query, so
         # the 500-event cap applies only to interactive/RDP/cached logons.
         $logonXPath=Get-SccLogonXPath -Days 14

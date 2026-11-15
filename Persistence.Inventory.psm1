@@ -322,6 +322,20 @@ function Get-SccEventRecords {
     try {Get-WinEvent -FilterHashtable $Filter -MaxEvents $Maximum -ErrorAction Stop}
     catch {if($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*'){throw}}
 }
+function ConvertTo-SccWmiSubscriptionRow {
+    # Review #22: Select-Object __CLASS is always empty on a CimInstance, and the
+    # old projection dropped ExecutablePath and every ActiveScript field, so a
+    # VBScript consumer lost both its class and its payload. Read the class from
+    # CimClass and keep the command/script fields of the common consumer types.
+    param($Instance,[string]$Namespace='root\subscription')
+    $class=$null
+    $cimClass=Get-SccPropertyValue $Instance 'CimClass'
+    if($cimClass){$class=[string](Get-SccPropertyValue $cimClass 'CimClassName')}
+    if(-not $class){$class=[string](Get-SccPropertyValue $Instance '__CLASS')}
+    $row=[ordered]@{'__CLASS'=$class;Namespace=$Namespace}
+    foreach($name in @('Name','Filter','Consumer','Query','QueryLanguage','EventNamespace','CommandLineTemplate','ExecutablePath','WorkingDirectory','ScriptingEngine','ScriptFileName','ScriptText')){$row[$name]=Get-SccPropertyValue $Instance $name}
+    [pscustomobject]$row
+}
 function Get-SccLogonXPath {
     # Review #21: the logon-type filter must run inside the event-log query.
     # Filtering after a 500-event cap let service/network logons (types 3/5)
@@ -382,7 +396,7 @@ function Get-SccPersistenceInventory {
     $collectors=[ordered]@{
       TaskRegistrationEvents={Get-SccEventRecords -Filter @{LogName='Microsoft-Windows-TaskScheduler/Operational';Id=106,140,141} -Maximum 400 | Select-Object TimeCreated,Id,Message}
       Services={Get-CimInstance Win32_Service -ErrorAction Stop | Select-Object Name,DisplayName,State,StartMode,StartName,PathName}
-      WmiSubscriptions={foreach($class in @('__EventConsumer','__EventFilter','__FilterToConsumerBinding')){Get-CimInstance -Namespace root\subscription -ClassName $class -ErrorAction Stop | Select-Object __CLASS,Name,Filter,Consumer,Query,CommandLineTemplate}}
+      WmiSubscriptions={foreach($class in @('__EventConsumer','__EventFilter','__FilterToConsumerBinding')){Get-CimInstance -Namespace root\subscription -ClassName $class -ErrorAction Stop | ForEach-Object {ConvertTo-SccWmiSubscriptionRow $_}}}
       Processes={Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {(Get-SccPropertyValue $_ 'Name') -match '(?i)wscript|cscript|mshta|powershell|pwsh|rundll32|regsvr32|bitsadmin|certutil|msbuild|installutil|regasm|msiexec'} | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine}
       Connections={Get-NetTCPConnection -ErrorAction Stop | Select-Object OwningProcess,LocalAddress,LocalPort,RemoteAddress,RemotePort,State}
       Defender={ $threats=@{};foreach($threat in @(Get-MpThreat -ErrorAction Stop)){$threats[[string]$threat.ThreatID]=$threat.ThreatName};Get-MpThreatDetection -ErrorAction Stop | ForEach-Object {$d=$_;[pscustomobject]@{InitialDetectionTime=$d.InitialDetectionTime;ThreatID=$d.ThreatID;ThreatName=$threats[[string]$d.ThreatID];ProcessName=$d.ProcessName;Resources=$d.Resources;ActionSuccess=$d.ActionSuccess;DomainUser=$d.DomainUser}} }

@@ -81,6 +81,25 @@ try {
         $decorated=Get-SccGenericEvidence -Name 'Decorated' -Collector {Get-Content -LiteralPath $hostsFixture | Where-Object {$_ -and $_ -notmatch '^\s*#'}}
         $decoratedJson=ConvertTo-Json -InputObject ([pscustomobject]@{Items=$decorated.Items}) -Depth 12 -Compress
         if($decorated.Items.Count -ne 1 -or $decoratedJson.Length -gt 200){throw ('Get-Content string was not flattened: '+$decoratedJson.Length+' chars')}
+        # Review #21: the logon-type filter is part of the event-log query, so
+        # the 500-event cap applies only to interactive/RDP/cached logons.
+        $logonXPath=Get-SccLogonXPath -Days 14
+        foreach($needle in @('EventID=4624','timediff(@SystemTime) <= 1209600000',"Data[@Name='LogonType']='2'","Data[@Name='LogonType']='7'","Data[@Name='LogonType']='10'","Data[@Name='LogonType']='11'")){
+            if(-not $logonXPath.Contains($needle)){throw ('logon XPath lacks '+$needle+': '+$logonXPath)}
+        }
+        if($logonXPath -match "LogonType']='(3|5)'"){throw 'logon XPath admits network/service logons'}
+        if((Get-SccLogonXPath -LogonTypes @("10' or '1'='1")) -match "'1'='1"){throw 'logon type values are not sanitized'}
+        # The event-log service itself must accept the query (Application is readable without admin).
+        try {$null=Get-WinEvent -LogName Application -FilterXPath $logonXPath -MaxEvents 1 -ErrorAction Stop}
+        catch {if($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*'){throw ('event log rejected the logon XPath: '+$_.Exception.Message)}}
+        function Get-WinEvent {
+            [CmdletBinding()]param([string]$LogName,[string]$FilterXPath,[int]$MaxEvents)
+            $script:CapturedEventQuery=[pscustomobject]@{LogName=$LogName;FilterXPath=$FilterXPath;MaxEvents=$MaxEvents}
+            Write-Error -Message 'No matching fixture events' -ErrorId 'NoMatchingEventsFound' -ErrorAction Stop
+        }
+        $script:CapturedEventQuery=$null
+        $noLogons=@(Get-SccXPathEventRecords -LogName 'Security' -XPath $logonXPath -Maximum 500)
+        if($noLogons.Count -ne 0 -or -not $script:CapturedEventQuery -or $script:CapturedEventQuery.LogName -ne 'Security' -or $script:CapturedEventQuery.MaxEvents -ne 500 -or $script:CapturedEventQuery.FilterXPath -ne $logonXPath){throw 'logon query did not pass the XPath filter to Get-WinEvent'}
         function Get-WinEvent {
             [CmdletBinding()]param([hashtable]$FilterHashtable,[int]$MaxEvents)
             if($FilterHashtable.LogName -eq 'fixture-records'){[pscustomobject]@{TimeCreated=[datetime]'2020-01-01';Id=1;Message='fixture event'};return}

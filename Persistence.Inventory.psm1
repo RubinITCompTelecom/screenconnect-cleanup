@@ -322,6 +322,20 @@ function Get-SccEventRecords {
     try {Get-WinEvent -FilterHashtable $Filter -MaxEvents $Maximum -ErrorAction Stop}
     catch {if($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*'){throw}}
 }
+function Get-SccLogonXPath {
+    # Review #21: the logon-type filter must run inside the event-log query.
+    # Filtering after a 500-event cap let service/network logons (types 3/5)
+    # crowd out the interactive, RDP and cached logons this section is for.
+    param([int]$Days=14,[string[]]$LogonTypes=@('2','7','10','11'))
+    $milliseconds=[int64]$Days*86400000
+    $types=@($LogonTypes | ForEach-Object {"Data[@Name='LogonType']='"+([string]$_ -replace '[^0-9]','')+"'"}) -join ' or '
+    "*[System[(EventID=4624) and TimeCreated[timediff(@SystemTime) <= $milliseconds]]] and *[EventData[$types]]"
+}
+function Get-SccXPathEventRecords {
+    param([string]$LogName,[string]$XPath,[int]$Maximum)
+    try {Get-WinEvent -LogName $LogName -FilterXPath $XPath -MaxEvents $Maximum -ErrorAction Stop}
+    catch {if($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*'){throw}}
+}
 function Get-SccPersistenceInventory {
     [CmdletBinding()]
     param([Parameter(Mandatory=$true)][string]$OutDir)
@@ -374,7 +388,7 @@ function Get-SccPersistenceInventory {
       Defender={ $threats=@{};foreach($threat in @(Get-MpThreat -ErrorAction Stop)){$threats[[string]$threat.ThreatID]=$threat.ThreatName};Get-MpThreatDetection -ErrorAction Stop | ForEach-Object {$d=$_;[pscustomobject]@{InitialDetectionTime=$d.InitialDetectionTime;ThreatID=$d.ThreatID;ThreatName=$threats[[string]$d.ThreatID];ProcessName=$d.ProcessName;Resources=$d.Resources;ActionSuccess=$d.ActionSuccess;DomainUser=$d.DomainUser}} }
       DefenderConfig={Get-MpPreference -ErrorAction Stop | Select-Object ExclusionPath,ExclusionProcess,ExclusionExtension,DisableRealtimeMonitoring}
       AntivirusProducts={Get-CimInstance -Namespace root\SecurityCenter2 -ClassName AntiVirusProduct -ErrorAction Stop | Select-Object displayName,productState}
-      Logons={Get-SccEventRecords -Filter @{LogName='Security';Id=4624;StartTime=(Get-Date).AddDays(-14)} -Maximum 500 | ForEach-Object {$event=$_;$data=@{};try{$xml=[xml]$event.ToXml();foreach($d in $xml.Event.EventData.Data){$data[$d.Name]=$d.'#text'}}catch{};if(@('2','7','10','11') -contains [string]$data.LogonType){[pscustomobject]@{Time=$event.TimeCreated;LogonType=$data.LogonType;User=$data.TargetUserName;IP=$data.IpAddress;Process=$data.ProcessName}}}}
+      Logons={Get-SccXPathEventRecords -LogName 'Security' -XPath (Get-SccLogonXPath -Days 14) -Maximum 500 | ForEach-Object {$event=$_;$data=@{};try{$xml=[xml]$event.ToXml();foreach($d in $xml.Event.EventData.Data){$data[$d.Name]=$d.'#text'}}catch{};if(@('2','7','10','11') -contains [string]$data.LogonType){[pscustomobject]@{Time=$event.TimeCreated;LogonType=$data.LogonType;User=$data.TargetUserName;IP=$data.IpAddress;Process=$data.ProcessName}}}}
       RdpEvents={foreach($spec in @(@('Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational',1149),@('Microsoft-Windows-TerminalServices-LocalSessionManager/Operational',21,22,24,25))){Get-SccEventRecords -Filter @{LogName=$spec[0];Id=@($spec|Select-Object -Skip 1);StartTime=(Get-Date).AddDays(-14)} -Maximum 400 | Select-Object TimeCreated,Id,Message}}
       Accounts={Get-LocalUser -ErrorAction Stop | Select-Object Name,Enabled,LastLogon,PasswordLastSet,Description}
       LocalAdministrators={Get-LocalGroupMember -Group 'Administrators' -ErrorAction Stop | Select-Object Name,ObjectClass,PrincipalSource}

@@ -108,7 +108,7 @@ Check 'plan uninstall keys are constrained to uninstall roots' (($remover -match
 Check 'uninstaller executable uses canonical install containment' (($remover -match 'Test-PathContained -Root \$installDir') -and (-not $remover.Contains('$bareExe.StartsWith($installDir')))
 Check 'process targeting uses literal canonical install containment' (($remover -match 'Test-PathContained -Root \$expandedInstallDir') -and ($remover -notmatch '(?m)ExecutablePath[^\r\n]*-like'))
 Check 'all persistence cleanup path references are literal' (($remover -match 'Test-LiteralPathReference') -and ($remover -notmatch '\$InstallDir\\\*') -and ($remover -notmatch '\*\$InstallDir\*'))
-Check 'path containment rejects reparse points' (($remover -match 'FileAttributes\]::ReparsePoint') -and ($remover -match 'Test-PathContained') -and ($remover -match 'Refusing to quarantine tree containing'))
+Check 'path containment rejects reparse points' (($remover -match 'FileAttributes\]::ReparsePoint') -and ($remover -match 'Test-PathContained') -and ($remover -match 'Reparse point encountered while hashing source tree'))
 Check 'moved quarantine payload ACLs are recursively verified' (($remover -match 'Protect-QuarantinePathAcl -Path \$destPath') -and ($remover -match 'Get-ChildItem -LiteralPath \$Path -Recurse') -and ($remover -match 'AreAccessRulesProtected'))
 Check 'deferred quarantine records structured identity fields' (($remover -match 'SourceIdentity') -and ($remover -match 'Get-PathIdentityHash -Path \$resumeDest') -and ($remover -match 'identity mismatch'))
 Check 'quarantine verifies identity after move' (($remover -match 'destinationIdentity') -and ($remover -match 'Post-move identity mismatch') -and ($remover -match 'Get-PathIdentityHash -Path \$destPath'))

@@ -16,6 +16,8 @@ Fixes for the findings in the 2026-11-12 code review. Not yet run end to end on 
   before the delayed move is queued, a failed registration queues nothing, and the fake "cancel" (which actually
   scheduled a delete) is gone (#10). `C:\RIT-SCC` itself is now locked to Administrators/SYSTEM (Users read), so
   the resume materials pass the trust check.
+  Quarantine source identity and hash CSV now share one tree walk and one read per file; the independent
+  destination identity check still detects changes after the move.
 - **Report:** sections with exactly one item (one process, connection, event, property) are no longer dropped (#4).
   The guided-run report passes scanner status and leaves the power-repair section out when the repair was declined (#24).
 - **AV uninstall:** works with 0 or 1 installed products under strict mode (#5); ignores HKCU uninstall entries,

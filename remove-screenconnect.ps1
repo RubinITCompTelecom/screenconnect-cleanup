@@ -166,7 +166,7 @@ function Get-Sha256Hex {
 }
 
 function Get-PathIdentityHash {
-    param([Parameter(Mandatory = $true)][string]$Path)
+    param([Parameter(Mandatory = $true)][string]$Path, [ref]$FileHashes)
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
     if (-not $item.PSIsContainer) {
         $hash = Get-Sha256File -Path $Path
@@ -181,13 +181,18 @@ function Get-PathIdentityHash {
         }
     }
     $lines = New-Object System.Collections.Generic.List[string]
+    $rows = New-Object System.Collections.Generic.List[object]
     foreach ($child in @($allChildren | Where-Object { -not $_.PSIsContainer })) {
         $hash = Get-Sha256File -Path $child.FullName
         if (-not $hash) { throw "Could not hash source tree file: $($child.FullName)" }
+        if ($null -ne $FileHashes) {
+            $rows.Add([pscustomobject]@{ Path = $child.FullName; Length = $child.Length; SHA256 = $hash })
+        }
         $relative = $child.FullName.Substring($rootFull.Length).TrimStart([char[]]@([char]92, [char]47))
         [void]$lines.Add(($relative.ToLowerInvariant() + '|' + [string]$child.Length + '|' + $hash.ToLowerInvariant()))
     }
     $identityText = 'directory`n' + (($lines.ToArray() | Sort-Object) -join "`n")
+    if ($null -ne $FileHashes) { $FileHashes.Value = $rows.ToArray() }
     return (Get-Sha256Hex -Text $identityText)
 }
 
@@ -1534,7 +1539,8 @@ function Move-ToQuarantine {
         throw "Refusing to quarantine reparse-point source: $SourcePath"
     }
     $isDirectory = $sourceItem.PSIsContainer
-    $sourceIdentity = Get-PathIdentityHash -Path $SourcePath
+    $sourceHashes = @()
+    $sourceIdentity = Get-PathIdentityHash -Path $SourcePath -FileHashes ([ref]$sourceHashes)
     if (-not $sourceIdentity) { throw "Could not establish source identity: $SourcePath" }
     $hashNote = ''
     $sha256 = ''
@@ -1542,27 +1548,15 @@ function Move-ToQuarantine {
         # A whole-tree move must not carry a junction/symlink across the
         # containment boundary. Fail closed instead of merely skipping it while
         # moving the rest of the tree.
-        $reparseItems = @(Get-ChildItem -LiteralPath $SourcePath -Recurse -Force -Attributes ReparsePoint -ErrorAction Stop)
-        if ($reparseItems.Count -gt 0) {
-            foreach ($rp in $reparseItems) {
-                Add-ManifestEntry -InstanceId $InstanceId -Action 'Quarantine' -Target $rp.FullName -Result 'Failed' -Details 'Reparse point (junction/symlink) blocks whole-tree quarantine'
-            }
-            throw "Refusing to quarantine tree containing $($reparseItems.Count) reparse point(s): $SourcePath"
-        }
+        # Get-PathIdentityHash already rejects all reparse points and collects
+        # these hashes during its single source-tree walk. Reuse that evidence
+        # for the sidecar; destination identity is still verified after moving.
         $safeInstanceFileStem = Get-SafeInstanceFileStem -InstanceId $InstanceId
         $hashCsv = Join-Path $WorkDir ('quarantine-hashes-' + $safeInstanceFileStem + '.csv')
         if (-not (Test-PathContained -Root $WorkDir -Candidate $hashCsv)) {
             throw "Refusing quarantine hash sidecar outside WorkDir: $hashCsv"
         }
-        $rows = New-Object System.Collections.ArrayList
-        foreach ($f in @(Get-ChildItem -LiteralPath $SourcePath -File -Recurse -Force -ErrorAction Stop)) {
-            $h = Get-Sha256File $f.FullName
-            [void]$rows.Add([PSCustomObject]@{
-                Path   = $f.FullName
-                Length = $f.Length
-                SHA256 = $h
-            })
-        }
+        $rows = @($sourceHashes)
         try {
             $rows | Export-Csv -LiteralPath $hashCsv -NoTypeInformation -Encoding UTF8 -ErrorAction Stop
             $hashNote = "directory, " + $rows.Count + " file(s) hashed -> " + $hashCsv
@@ -1571,7 +1565,7 @@ function Move-ToQuarantine {
         }
         $sha256 = $hashNote
     } else {
-        $sha256 = Get-Sha256File $SourcePath
+        $sha256 = $sourceIdentity
     }
     $destName = [System.IO.Path]::GetFileName($SourcePath)
     $instanceDirName = Get-SafeInstanceDirectoryName -InstanceId $InstanceId

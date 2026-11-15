@@ -251,17 +251,89 @@ function Get-Sha256Hex {
     } finally { $sha.Dispose() }
 }
 
+$script:UserProfileCache = $null
+
 function Expand-Env {
     param([string]$Path)
     if (-not $Path) { return $Path }
     return [System.Environment]::ExpandEnvironmentVariables($Path)
 }
 
+function Get-UserProfileRoots {
+    # Every real user profile on the PC (not just the account running this
+    # script, which is the elevating technician, not the person whose PC it is).
+    # Same approach as Persistence.Inventory.psm1: ProfileList gives SID + folder,
+    # HKEY_USERS\<SID> is the hive when it is loaded. Hives are never mounted
+    # here (read-only); an unloaded profile gets Loaded = $false and a warning.
+    param(
+        [string]$ProfileListPath = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList',
+        [string]$HiveRootPrefix  = 'Registry::HKEY_USERS'
+    )
+    $profiles = New-Object System.Collections.ArrayList
+    try {
+        if (Test-Path -LiteralPath $ProfileListPath) {
+            foreach ($key in @(Get-ChildItem -LiteralPath $ProfileListPath -ErrorAction Stop)) {
+                $sid = [string]$key.PSChildName
+                if ($sid -notmatch '^S-1-(5-21|12-1)-') { continue }
+                try {
+                    $img = [string](Get-ItemProperty -LiteralPath $key.PSPath -Name ProfileImagePath -ErrorAction Stop).ProfileImagePath
+                } catch { continue }
+                $folder = [System.Environment]::ExpandEnvironmentVariables($img)
+                if (-not $folder) { continue }
+                $root = $HiveRootPrefix + '\' + $sid
+                [void]$profiles.Add([PSCustomObject]@{
+                    Sid         = $sid
+                    Name        = (Split-Path -Path $folder -Leaf)
+                    ProfilePath = $folder
+                    HiveRoot    = $root
+                    Loaded      = [bool](Test-Path -LiteralPath $root)
+                    AppData     = (Join-Path $folder 'AppData\Roaming')
+                    LocalAppData = (Join-Path $folder 'AppData\Local')
+                })
+            }
+        }
+    } catch {
+        Write-Log "  ! Could not enumerate user profiles: $($_.Exception.Message)" "Yellow"
+    }
+    return $profiles.ToArray()
+}
+
+function Get-PatternExpansions {
+    # A path pattern as it applies to every user: %APPDATA% / %LOCALAPPDATA% /
+    # %USERPROFILE% become each profile's own folder; the current process's
+    # own expansion is kept too (covers a profile missing from ProfileList).
+    param([string]$Pattern, $Profiles = $null)
+    $out = New-Object System.Collections.Generic.List[string]
+    $out.Add((Expand-Env $Pattern))
+    if ($Pattern -match '(?i)%(APPDATA|LOCALAPPDATA|USERPROFILE)%') {
+        if ($null -eq $Profiles) { $Profiles = @(Get-UserProfileRoots) }
+        foreach ($p in $Profiles) {
+            $s = $Pattern -replace '(?i)%LOCALAPPDATA%', ($p.LocalAppData -replace '\$', '$$$$')
+            $s = $s -replace '(?i)%APPDATA%', ($p.AppData -replace '\$', '$$$$')
+            $s = $s -replace '(?i)%USERPROFILE%', ($p.ProfilePath -replace '\$', '$$$$')
+            $e = Expand-Env $s
+            if (-not $out.Contains($e)) { $out.Add($e) }
+        }
+    }
+    return $out.ToArray()
+}
+
 function Get-DirsMatching {
     # Wildcard directory match without relying on Get-Item wildcard escaping,
     # which trips over paths like "Program Files (x86)".
     param([string]$Pattern)
-    $expanded = Expand-Env $Pattern
+    if ($Pattern -match '(?i)%(APPDATA|LOCALAPPDATA|USERPROFILE)%' -and $null -eq $script:UserProfileCache) {
+        $script:UserProfileCache = @(Get-UserProfileRoots)
+    }
+    $found = @{}
+    foreach ($expanded in (Get-PatternExpansions $Pattern $script:UserProfileCache)) {
+        foreach ($d in (Get-DirsMatchingExpanded $expanded)) { $found[$d.FullName] = $d }
+    }
+    return @($found.Keys | Sort-Object | ForEach-Object { $found[$_] })
+}
+
+function Get-DirsMatchingExpanded {
+    param([string]$expanded)
     $parent   = Split-Path -Path $expanded -Parent
     $leaf     = Split-Path -Path $expanded -Leaf
     if (-not $parent -or -not (Test-Path -LiteralPath $parent)) { return @() }
@@ -391,13 +463,35 @@ function Get-AllProcesses {
 }
 
 function Get-AllUninstallEntries {
-    $roots = @(
+    # Machine-wide roots, then the Uninstall key of EVERY loaded user hive (not
+    # just the technician's HKCU). UserSid / UserName are $null for HKLM rows.
+    param($Profiles = $null)
+    $roots = New-Object System.Collections.ArrayList
+    foreach ($r in @(
         "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
-        "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
-    )
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+    )) { [void]$roots.Add([PSCustomObject]@{ Path = $r; Sid = $null; User = $null }) }
+    if ($null -eq $Profiles) {
+        if ($null -eq $script:UserProfileCache) { $script:UserProfileCache = @(Get-UserProfileRoots) }
+        $Profiles = $script:UserProfileCache
+    }
+    foreach ($p in @($Profiles)) {
+        if (-not $p.Loaded) {
+            Write-Log ("  ! User {0} ({1}): registry hive not loaded, per-user installed programs not read" -f $p.Name, $p.Sid) "Yellow"
+            continue
+        }
+        [void]$roots.Add([PSCustomObject]@{ Path = ($p.HiveRoot + '\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'); Sid = $p.Sid; User = $p.Name })
+    }
+    # Keep the old behaviour as a fallback when the running account has no
+    # loaded ProfileList entry (e.g. SYSTEM, or ProfileList unreadable).
+    $curSid = $null
+    try { $curSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch { }
+    if ($curSid -and -not @($Profiles | Where-Object { $_.Loaded -and $_.Sid -eq $curSid })) {
+        [void]$roots.Add([PSCustomObject]@{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'; Sid = $curSid; User = $env:USERNAME })
+    }
     $out = New-Object System.Collections.ArrayList
-    foreach ($r in $roots) {
+    foreach ($rootSpec in $roots) {
+        $r = $rootSpec.Path
         if (-not (Test-Path -LiteralPath $r)) { continue }
         try {
             foreach ($k in (Get-ChildItem -LiteralPath $r -ErrorAction SilentlyContinue)) {
@@ -406,6 +500,8 @@ function Get-AllUninstallEntries {
                     if (-not $p.DisplayName) { continue }
                     [void]$out.Add([PSCustomObject]@{
                         RegistryKey          = ($k.PSPath -replace '^Microsoft\.PowerShell\.Core\\Registry::', '')
+                        UserSid              = $rootSpec.Sid
+                        UserName             = $rootSpec.User
                         KeyName              = $k.PSChildName
                         DisplayName          = $p.DisplayName
                         DisplayVersion       = $p.DisplayVersion

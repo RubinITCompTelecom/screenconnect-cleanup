@@ -1729,6 +1729,25 @@ function Remove-ResumeTask {
 # -----------------------------------------------------------------------------
 # Persistence cleanup (scheduled tasks, Run keys, WMI subscriptions)
 # -----------------------------------------------------------------------------
+function Open-RunKeyForCleanup {
+    # Opens 'HKLM:\...' / 'HKCU:\...' as a Microsoft.Win32.RegistryKey in the
+    # default view (the one the PowerShell registry provider uses in this
+    # process). Returns $null when the key does not exist. Throws for any
+    # other hive so an unexpected path is reported, never guessed.
+    param([Parameter(Mandatory = $true)][string]$Path, [bool]$Writable)
+    $hive = $null
+    $subKey = $null
+    if ($Path -match '^(?i)HKLM:\\(.+)$') { $hive = [Microsoft.Win32.RegistryHive]::LocalMachine; $subKey = $Matches[1] }
+    elseif ($Path -match '^(?i)HKCU:\\(.+)$') { $hive = [Microsoft.Win32.RegistryHive]::CurrentUser; $subKey = $Matches[1] }
+    else { throw "Unsupported Run key path: $Path" }
+    $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey($hive, [Microsoft.Win32.RegistryView]::Default)
+    try {
+        return $baseKey.OpenSubKey($subKey, $Writable)
+    } finally {
+        $baseKey.Close()
+    }
+}
+
 function Clean-Persistence {
     # -RunKeys exists so tests can point the Run-key sweep at a throwaway key;
     # production callers always use the default list.
@@ -1815,27 +1834,33 @@ function Clean-Persistence {
     }
 
     # 2. Registry Run/RunOnce keys
+    # Read and delete through Microsoft.Win32.RegistryKey, never through
+    # Get-ItemProperty/Remove-ItemProperty -Name: the provider treats a value
+    # name as a wildcard, so a value literally named '*' (or '[a]x') would
+    # delete every value in the Run key. RegistryKey.DeleteValue takes the
+    # name literally. RegistryView.Default is the view the registry provider
+    # uses in this process, and the WOW6432Node paths are listed explicitly,
+    # so the keys reached are the same as before.
     foreach ($rk in @($RunKeys)) {
-        if (-not (Test-Path -LiteralPath $rk)) { continue }
+        $regKey = $null
         try {
-            $vals = Get-ItemProperty -LiteralPath $rk -ErrorAction SilentlyContinue
-            if ($vals) {
-                foreach ($prop in $vals.PSObject.Properties) {
-                    if ($prop.Name -eq 'PSPath' -or $prop.Name -eq 'PSParentPath' -or $prop.Name -eq 'PSChildName' -or $prop.Name -eq 'PSDrive' -or $prop.Name -eq 'PSProvider') { continue }
-                    $val = $prop.Value
-                    $expandedVal = if ($val) { Expand-Env ([string]$val) } else { $val }
-                    if ($expandedVal -and (Test-LiteralPathReference -Text ([string]$expandedVal) -Path $InstallDir)) {
-                        Write-Log "  Found Run key referencing install dir: $rk\$($prop.Name) = $val"
-                        if ($Execute) {
-                            Remove-ItemProperty -LiteralPath $rk -Name $prop.Name -Force -ErrorAction Stop
-                            Write-Log "    Deleted Run key value: $prop.Name"
-                            Add-ManifestEntry -InstanceId $InstanceId -Action 'DeleteRunKey' -Target "$rk\$($prop.Name)" -Result 'Success' -Details "Referenced $InstallDir"
-                            $cleaned++
-                        } else {
-                            Write-Log "    [DRY-RUN] Would delete Run key value: $prop.Name"
-                            Add-ManifestEntry -InstanceId $InstanceId -Action 'DeleteRunKey' -Target "$rk\$($prop.Name)" -Result 'DryRun' -Details "Referenced $InstallDir"
-                            $cleaned++
-                        }
+            $regKey = Open-RunKeyForCleanup -Path $rk -Writable ([bool]$Execute)
+            if ($null -eq $regKey) { continue }
+            foreach ($valueName in @($regKey.GetValueNames())) {
+                $shownName = if ([string]::IsNullOrEmpty($valueName)) { '(default)' } else { $valueName }
+                $val = $regKey.GetValue($valueName)
+                $expandedVal = if ($val) { Expand-Env ([string]$val) } else { $val }
+                if ($expandedVal -and (Test-LiteralPathReference -Text ([string]$expandedVal) -Path $InstallDir)) {
+                    Write-Log "  Found Run key referencing install dir: $rk\$shownName = $val"
+                    if ($Execute) {
+                        $regKey.DeleteValue($valueName, $true)
+                        Write-Log "    Deleted Run key value: $shownName"
+                        Add-ManifestEntry -InstanceId $InstanceId -Action 'DeleteRunKey' -Target "$rk\$shownName" -Result 'Success' -Details "Referenced $InstallDir"
+                        $cleaned++
+                    } else {
+                        Write-Log "    [DRY-RUN] Would delete Run key value: $shownName"
+                        Add-ManifestEntry -InstanceId $InstanceId -Action 'DeleteRunKey' -Target "$rk\$shownName" -Result 'DryRun' -Details "Referenced $InstallDir"
+                        $cleaned++
                     }
                 }
             }
@@ -1843,6 +1868,8 @@ function Clean-Persistence {
             $failed = $true
             Write-Log ("  Failed to delete Run key value: " + $_.Exception.Message) 'Error'
             Add-ManifestEntry -InstanceId $InstanceId -Action 'DeleteRunKey' -Target 'N/A' -Result 'Failed' -Details $_.Exception.Message
+        } finally {
+            if ($null -ne $regKey) { $regKey.Close() }
         }
     }
 

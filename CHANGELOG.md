@@ -4,6 +4,13 @@ Semantic versions. The deploy zip is named `screenconnect-cleanup-v<VER>.zip`
 and carries a `VERSION` file so each build is self-identifying.
 
 ## [Unreleased] - README rewrite, one-liner installer fix
+- **Fix: the window's Online half skipped the cleanup and went straight to the scanners** on a PC
+  with no finished Offline run (including right after Stage tools, which makes no run). The Online
+  half has no removal step and silently became a scanner-only run. It now asks: **Clean up first,
+  then scan** (the full START-HERE.bat sequence: detection, removal with the typed REMOVE, then the
+  scanners, then the report is shared) or **Scanners only**; closing the question starts nothing.
+  Continuing a finished offline run is unchanged. Tests: three new Online scenarios in
+  `tests/gui/Test-GuiWindow.ps1`.
 - **Fix: the `irm ... | iex` one-liner failed on the GUI releases** ("Bundle missing VERSION"):
   `install-latest.ps1` expected VERSION and START-HERE.bat at the top of the zip, which since
   1.8.12-gui-alpha.3 holds only START-HERE-GUI.bat plus `files\`. It now recognises both layouts and

@@ -14,7 +14,9 @@
   state to the result file and closes itself; this test then checks that state and the calls made.
 
   Scenarios: Offline with a keep/remove choice and a typed REMOVE; Offline with the confirmation
-  refused; a wrong typed word; the Online half continuing that run; Online skipping every scan;
+  refused; a wrong typed word; the Online half continuing that run; Online with no offline run on
+  the PC (question closed = nothing runs; "Clean up first, then scan" = removal, then the scanners);
+  Online skipping every scan;
   Stage; and an Offline run with every optional step switched on. The window offers no Full run
   (it is Offline then Online); asking for one is refused.
 
@@ -285,9 +287,50 @@ try {
         Check ($on.State.Steps.'9o' -eq 'done' -and $on.State.Steps.'6a' -eq 'done') 'steps 6a and 9o show done'
     } else { Check $false 'offline then online produced results' }
 
-    Write-Host 'Online half: every scan skipped, scanner-only run' -ForegroundColor Cyan
-    $r = Invoke-Window 'online-skip' 'Online' @{ Scanners = @{ Value = 'skip' }; AvUninstall = @{ Value = 'y' } }
+    # ---------------------------------------------------------------- Online with no offline run on the PC
+    Write-Host 'Online half, no offline run on this PC: the question closed starts nothing' -ForegroundColor Cyan
+    $r = Invoke-Window 'online-noprior-closed' 'Online' @{ Scanners = @{ Value = 'go' } }
+    Check ($r.Done -and $r.Calls.Count -eq 0 -and @(Get-ChildItem -LiteralPath $r.Harness.Rit -Directory -ErrorAction SilentlyContinue).Count -eq 0) 'closing the cleanup-or-scanners question runs no script and creates no run folder'
+
+    Write-Host 'Online half, no offline run on this PC: "Clean up first, then scan"' -ForegroundColor Cyan
+    $r = Invoke-Window 'online-noprior-full' 'Online' @{
+        NoPriorRun = @{ Value = 'full' }
+        KeepSelection = @{ Keep = @() }
+        RemoveConfirm = @{ Value = 'ok'; Text = 'REMOVE' }
+        Scanners = @{ Value = 'go'; Checks = @{ ScanKvrt = $true; ScanEset = $true; ScanMalwarebytes = $true } }
+        OpenReview = @{ Value = 'n' }; AvUninstall = @{ Value = 'n' }; PowerRepair = @{ Value = 'go' }; LowDisk = @{ Value = 'y' } } -Stubs @{ 'Submit-ConnectWiseReport.ps1' = $shareStub }
     if ($r.State) {
+        $names = @($r.Names)
+        Check ($r.State.Mode -eq 'Full') 'the Online half switched to the one-go run (cleanup, then scanners)'
+        Check ($names -contains 'remove-screenconnect.ps1') 'the cleanup ran: the remover was called after the typed REMOVE'
+        $iRm = [array]::IndexOf($names, 'remove-screenconnect.ps1'); $iScan = [array]::IndexOf($names, 'Invoke-GUIScanner.ps1')
+        Check ($iRm -ge 0 -and $iScan -gt $iRm) ('removal runs BEFORE the scanners: ' + ($names -join ', '))
+        Check ((@($names | Where-Object { $_ -eq 'Invoke-GUIScanner.ps1' }).Count -eq 3) -and ($names -contains 'Get-AVTools.ps1') -and ($names -contains 'preflight.ps1')) 'it staged the tools, ran preflight and all three scanners'
+        $share = @($r.Calls | Where-Object { $_ -like 'Submit-ConnectWiseReport.ps1|*' })
+        Check ($share.Count -eq 1 -and $share[0] -notlike '*-NoUpload*') 'the report is shared once, for real (no -NoUpload)'
+        Check ($r.State.Steps.'5' -eq 'done' -and $r.State.Steps.'6a' -eq 'done') 'steps 5 and 6a show done'
+    } else { Check $false 'online-noprior-full produced a result' }
+
+    Write-Host 'Stage tools first, then the Online half on the same PC: the cleanup still runs' -ForegroundColor Cyan
+    $st = Invoke-Window 'stage-first' 'Stage' @{}
+    Check ($st.State -and @(Get-ChildItem -LiteralPath $st.Harness.Rit -Directory -ErrorAction SilentlyContinue).Count -eq 0) 'staging finished and left no run folder (so there is no offline run to continue)'
+    $r = Invoke-Window 'stage-then-online' 'Online' @{
+        NoPriorRun = @{ Value = 'full' }
+        KeepSelection = @{ Keep = @() }
+        RemoveConfirm = @{ Value = 'ok'; Text = 'REMOVE' }
+        Scanners = @{ Value = 'go'; Checks = @{ ScanKvrt = $true; ScanEset = $true; ScanMalwarebytes = $true } }
+        OpenReview = @{ Value = 'n' }; AvUninstall = @{ Value = 'n' }; PowerRepair = @{ Value = 'go' }; LowDisk = @{ Value = 'y' } } $st.Harness -Stubs @{ 'Submit-ConnectWiseReport.ps1' = $shareStub }
+    if ($r.State) {
+        $names = @($r.Names)
+        $iRm = [array]::IndexOf($names, 'remove-screenconnect.ps1'); $iScan = [array]::IndexOf($names, 'Invoke-GUIScanner.ps1')
+        Check ($r.State.Mode -eq 'Full' -and $iRm -ge 0 -and $iScan -gt $iRm) ('after staging, Online asked and ran the cleanup, then the scanners: ' + ($names -join ', '))
+        Check ($r.State.Steps.'5' -eq 'done') 'step 5 (Review and remove ScreenConnect) shows done, not skipped'
+    } else { Check $false 'stage-then-online produced a result' }
+
+    Write-Host 'Online half: every scan skipped, scanner-only run' -ForegroundColor Cyan
+    $r = Invoke-Window 'online-skip' 'Online' @{ NoPriorRun = @{ Value = 'scan' }; Scanners = @{ Value = 'skip' }; AvUninstall = @{ Value = 'y' } }
+    if ($r.State) {
+        Check (-not ($r.Names -contains 'remove-screenconnect.ps1') -and -not ($r.Names -contains 'preflight.ps1')) '"Scanners only" runs no cleanup step'
         Check (-not ($r.Names -contains 'Invoke-GUIScanner.ps1')) 'skipping every scan launches no scanner'
         $avu = @($r.Calls | Where-Object { $_ -like 'Invoke-AVUninstaller.ps1|*' })
         Check ($avu.Count -eq 1 -and $avu[0] -like '*-LogDir*logs') 'answering yes to the AV uninstall runs it once, with the run''s logs folder'

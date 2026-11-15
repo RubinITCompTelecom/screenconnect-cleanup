@@ -68,6 +68,12 @@ If there is no finished offline run (or you answer `n`), the online half does a
 because there is no report to share. The scanner results are under `logs\` in
 that run folder.
 
+In the **window** (START-HERE-GUI.bat), the Online half first asks what to do when there is no
+finished offline run: **Clean up first, then scan** runs everything in one go, the same
+sequence as START-HERE.bat (detection, removal with the typed REMOVE, then the scanners, then
+the report is shared); **Scanners only** is the scanner-only run above; closing the question
+starts nothing. Before this, the window went straight to the scanners and the cleanup never ran.
+
 ## Differences from the full run you should know about
 
 - **Order.** In the full run the persistence investigation comes *after* the

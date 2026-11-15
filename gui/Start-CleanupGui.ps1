@@ -131,6 +131,9 @@ $script:SessionWriteWarned = $false
 # Offline followed by Online, so it is not offered (owner, 2026-11-10).
 $script:ModeLabels = @{}
 foreach ($m in (Get-GuiWindowModes)) { $script:ModeLabels[$m.Name] = $m.Label }
+# The one-go run is never a start-panel choice: the Online half switches to it only when this PC has
+# no finished offline-half run and the technician chooses "Clean up first, then scan" (Start-Run).
+$script:OneGoLabel = 'Online: cleanup first, then scanners (no offline run to continue)'
 
 # Test hooks: canned dialog answers stand in for the technician's clicks (tests\gui only).
 # They are honoured ONLY in a window that is NOT elevated. Nothing the engine does to the PC can
@@ -225,6 +228,7 @@ function Get-NotInModeReason {
         'Online' { if ($phases -contains 'OFFLINE') { return 'done by the Offline half' }; return 'not part of the Online half' }
         'Detect' { return 'not in Detect only (it changes nothing)' }
         'Stage' { return 'not in Stage tools (downloads only)' }
+        'Full' { return 'only used when continuing an offline run' }
         default { return 'not in this mode' }
     }
 }
@@ -788,6 +792,18 @@ function Start-Run {
             $r = Show-Dialog -Id 'ContinuePrior' -Title 'Continue the offline run?' -Message ('A finished offline-half run was found for this PC:' + "`r`n" + $prior.RunRoot + "`r`n`r`nContinue that run? Its report is shared at the end. Otherwise a scanner-only run starts and nothing is shared.") -Buttons @(
                 @{ Text = 'Continue that run'; Value = 'continue' }, @{ Text = 'Start a scanner-only run'; Value = 'new' })
             if ($r -and $r.Value -eq 'new') { $prior = $null }
+        } else {
+            # No finished offline-half run on this PC (staging the tools does not make one). The Online
+            # half has no removal step, so starting it here used to go straight to the scanners and the
+            # cleanup never ran. Ask: clean up first (the one-go sequence START-HERE.bat runs: removal,
+            # then the scanners), or scanners only. Closing the box starts nothing.
+            $r = Show-Dialog -Id 'NoPriorRun' -Title 'The cleanup has not run on this PC' -Message ('No finished cleanup (Offline half) run was found for this PC, so the Online half has nothing to continue. Staging the tools does not count as a cleanup.' + "`r`n`r`nClean up first? Detection and removal run first (you choose what to keep and type REMOVE), then the scanners, and the report is shared at the end.") -Buttons @(
+                @{ Text = 'Clean up first, then scan'; Value = 'full' }, @{ Text = 'Scanners only'; Value = 'scan' })
+            if (-not $r) { Add-ConsoleNote 'No run started: the cleanup-or-scanners question was closed.'; if ($script:AutoStart) { $win.Close() }; return }
+            if ($r.Value -eq 'full') {
+                $ModeName = 'Full'
+                $sess = New-GuiSession -Mode $ModeName -ToolRoot $ToolRoot -RitRoot $RitRoot -Interactive
+            }
         }
     }
     try {
@@ -814,10 +830,11 @@ function Start-Run {
     $ui.ReviewBar.Visibility = 'Collapsed'
     $ui.BtnNewRun.Visibility = 'Collapsed'
     $ui.BtnRestart.Visibility = 'Collapsed'
-    $ui.InfoText.Text = 'PC: ' + $env:COMPUTERNAME + '     Mode: ' + $script:ModeLabels[$ModeName]
+    $label = $(if ($ModeName -eq 'Full') { $script:OneGoLabel } else { $script:ModeLabels[$ModeName] })
+    $ui.InfoText.Text = 'PC: ' + $env:COMPUTERNAME + '     Mode: ' + $label
     $ui.RunText.Text = $(if ($run) { 'Run folder: ' + $run } else { 'Run folder: none (this mode creates none)' })
     Show-Panel 'Run'
-    Add-ConsoleNote ($script:ModeLabels[$ModeName] + $(if ($run) { '. Run folder: ' + $run } else { '' }))
+    Add-ConsoleNote ($label + $(if ($run) { '. Run folder: ' + $run } else { '' }))
     if ($sess.ScannerOnly) { Add-ConsoleNote 'No offline-half run is being continued: this is a scanner-only run. There is no report to share from it.' }
     Save-Session
     Update-Stepper

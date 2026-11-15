@@ -137,16 +137,38 @@ cookies, saved passwords, mail-forwarding rules, and new accounts. The report mu
 with a **credential-reset checklist**. Stage 1 already collects most of what it needs.
 This is a report section, not a module — keep it proportionate, but do not omit it.
 
-### 13. Automatic report upload is authenticated and minimized
+### 13. Automatic report share is minimized, and it is a paste, not a vault
 
-The default report relay may upload only the generated sanitized package to the configured
-HTTPS relay. Missing credentials fail closed: no unauthenticated fallback, public directory,
-or silent retry is allowed. The package excludes raw config contents, raw evidence, parameter
-blobs, account names, credentials, tokens, passwords, private keys, and connection strings;
-user-profile paths are normalized. The relay validates and size-limits the ZIP, encrypts it at
-rest, exposes no listing/download route, deduplicates retries by package hash, and applies a
-finite retention period. ConnectWise submission remains an operator-reviewed action through
-its official reporting workflow unless a documented official API is verified.
+What the code does (`Submit-ConnectWiseReport.ps1`): the only share path is a post to the
+MicroBin paste server named by `-MicroBinUrl` or `microbin-url.txt` beside the script. With no
+URL configured nothing is sent and the uploader prints `MICROBIN UPLOAD: skipped; ...`. With
+`-NoUpload` (the offline half, or the share tick box unticked) nothing is sent either.
+
+- **What is sent:** only the sanitized report JSON, as the paste text. The ZIP, the HTML
+  report and raw evidence stay on the PC. The shared copy is built separately: the computer
+  name and run id are replaced by an anonymous PC id, and local network addresses and ports are
+  left out (the local package also omits the local address and keeps only the local port). Raw config contents,
+  parameter blobs, account names, credentials, tokens, passwords, private keys and connection
+  strings are excluded; user-profile paths are normalized wherever they appear in a string
+  (`X:\Users\name`, `Documents and Settings`, `Windows.old\Users`, UNC and forward-slash forms).
+- **Transport:** HTTPS is required (`-AllowInsecureRelay` exists for local tests only).
+- **Authentication is optional:** an uploader password is sent only when one is configured
+  (`-MicroBinUploaderPasswordFile` or `SCREENCONNECT_MICROBIN_UPLOADER_PASSWORD`). Without one
+  the upload is still attempted; it does not fail closed. Whether the server demands a
+  password is a server setting this repository does not control.
+- **Not encrypted by the client:** the paste is plain text on the server. It is created with
+  `privacy=readonly` and `expiration=1week`; readonly is unlisted and not editable, and on a
+  server that does not enable readonly it degrades to an unlisted paste. **Anyone who has the
+  paste URL can read it**, so treat the link as the secret.
+- **Failure:** an upload failure is loud (`MICROBIN UPLOAD FAILED`, nonzero exit) and leaves
+  the local report and package in place. There is no silent retry and no fallback target.
+
+ConnectWise submission remains an operator-reviewed action through its official reporting
+workflow unless a documented official API is verified.
+
+The `relay/` folder holds an older authenticated ZIP relay that encrypts at rest. The current
+client does not post to it; see `relay/README.md`. The live server was not checked when this
+rule was rewritten (2026-11-15).
 
 ---
 

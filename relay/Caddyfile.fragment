@@ -1,4 +1,8 @@
-# Private authenticated ScreenConnect report relay.
+# Private authenticated ScreenConnect report relay (relay/app.py on 127.0.0.1:9127).
+# STALE: the current client (Submit-ConnectWiseReport.ps1) does not post to this relay; it
+# pastes the sanitized report JSON to the MicroBin server in microbin-url.txt, which ships
+# pointing at this same host name. This fragment was not checked against the live server and
+# may not match what that host serves now. Do not deploy it without checking.
 reports.aygross.xyz {
     request_body {
         max_size 50MB

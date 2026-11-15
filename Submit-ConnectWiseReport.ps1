@@ -98,7 +98,9 @@ function Convert-ReportPath {
     param([object]$Value)
     if ($null -eq $Value) { return $null }
     $text = [string]$Value
-    $text = $text -replace '(?i)[A-Z]:\\Users\\[^\\]+', '<USERPROFILE>'
+    # Hide the user-name segment wherever it sits: X:\Users\n, Windows.old\Users\n,
+    # UNC (\\pc\c$\Users\n), forward slashes, and Documents and Settings.
+    $text = $text -replace '(?i)(\\Users\\|\\Documents and Settings\\|/Users/)[^\\/]+', '$1<USERPROFILE>'
     $text = $text -replace '(?i)/home/[^/]+', '<USERPROFILE>'
     return $text
 }
@@ -130,8 +132,8 @@ function New-SafeConnectionRecord {
     param([object]$Connection)
     if ($null -eq $Connection) { return $null }
     $record = [ordered]@{}
+    # LocalAddress is never reported, in the local package or the shared copy.
     if (-not $script:AnonymizeForShare) {
-        $record['LocalAddress'] = Convert-ReportScalar (Get-Field $Connection 'LocalAddress')
         $record['LocalPort']    = Convert-ReportScalar (Get-Field $Connection 'LocalPort')
     }
     $record['RemoteAddress'] = Convert-ReportScalar (Get-Field $Connection 'RemoteAddress')

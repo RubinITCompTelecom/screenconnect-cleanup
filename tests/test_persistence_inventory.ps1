@@ -81,6 +81,14 @@ try {
         $decorated=Get-SccGenericEvidence -Name 'Decorated' -Collector {Get-Content -LiteralPath $hostsFixture | Where-Object {$_ -and $_ -notmatch '^\s*#'}}
         $decoratedJson=ConvertTo-Json -InputObject ([pscustomobject]@{Items=$decorated.Items}) -Depth 12 -Compress
         if($decorated.Items.Count -ne 1 -or $decoratedJson.Length -gt 200){throw ('Get-Content string was not flattened: '+$decoratedJson.Length+' chars')}
+        # Optimization: user-writable roots are swept before Program Files.
+        $sweep=@(Get-SccScriptSweepRoots)
+        if($env:SystemDrive -and $env:ProgramFiles){
+            $usersAt=[array]::IndexOf([string[]]$sweep,(Join-Path $env:SystemDrive 'Users'))
+            $pfAt=[array]::IndexOf([string[]]$sweep,$env:ProgramFiles)
+            if($usersAt -ne 0 -or $pfAt -le $usersAt){throw ('script sweep roots are not user-writable first: '+($sweep -join '; '))}
+            if($env:ProgramData -and [array]::IndexOf([string[]]$sweep,$env:ProgramData) -gt $pfAt){throw 'ProgramData is swept after Program Files'}
+        }
         # Review #22: WMI consumers keep their class and command/script body.
         $wmi=Get-SccGenericEvidence -Name 'WmiFixture' -Collector {
             ConvertTo-SccWmiSubscriptionRow ([pscustomobject]@{CimClass=[pscustomobject]@{CimClassName='ActiveScriptEventConsumer'};Name='Updater';ScriptingEngine='VBScript';ScriptText='CreateObject("WScript.Shell").Run "x"';ScriptFileName=''})

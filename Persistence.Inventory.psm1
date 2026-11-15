@@ -350,6 +350,15 @@ function Get-SccXPathEventRecords {
     try {Get-WinEvent -LogName $LogName -FilterXPath $XPath -MaxEvents $Maximum -ErrorAction Stop}
     catch {if($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*'){throw}}
 }
+function Get-SccScriptSweepRoots {
+    # The sweep stops at its file/time budget, so user-writable roots (where
+    # dropped scripts live) go first and Program Files last.
+    $roots=New-Object System.Collections.ArrayList
+    if($env:SystemDrive){[void]$roots.Add((Join-Path $env:SystemDrive 'Users'))}
+    if($env:SystemRoot){[void]$roots.Add((Join-Path $env:SystemRoot 'Temp'))}
+    foreach($root in @($env:ProgramData,$env:ProgramFiles,${env:ProgramFiles(x86)})){if($root){[void]$roots.Add($root)}}
+    @($roots.ToArray())
+}
 function Get-SccPersistenceInventory {
     [CmdletBinding()]
     param([Parameter(Mandatory=$true)][string]$OutDir)
@@ -417,10 +426,7 @@ function Get-SccPersistenceInventory {
         foreach($e in $evidence.Errors){[void]$errors.Add($e)}
         Write-Host ('SCC_PERSISTENCE_DONE|'+$name)
     }
-    $roots=@($env:ProgramData,$env:ProgramFiles,${env:ProgramFiles(x86)})
-    if($env:SystemDrive){$roots+=(Join-Path $env:SystemDrive 'Users')}
-    if($env:SystemRoot){$roots+=(Join-Path $env:SystemRoot 'Temp')}
-    $roots=@($roots | Where-Object {$_ -and (Test-Path -LiteralPath $_)})
+    $roots=@(Get-SccScriptSweepRoots | Where-Object {Test-Path -LiteralPath $_})
     Write-Host 'SCC_PERSISTENCE_SECTION|ScriptFiles'
     $scripts=Get-SccBoundedScriptFiles -Roots $roots -MaxFiles $script:InventoryMaxFiles -MaxSeconds $script:InventoryMaxSeconds
     Write-Host 'SCC_PERSISTENCE_DONE|ScriptFiles'

@@ -105,8 +105,11 @@ function New-GuiSession {
             if ($callPhases -and @($callPhases.Value) -notcontains $phase) { continue }
             $destructive = $false
             if ($step.PSObject.Properties['Destructive']) { $destructive = [bool]$step.Destructive }
+            # The online share step reads differently when the technician unticked sharing ("TitleNoShare").
+            $title = [string]$step.Title
+            if (-not [bool]$merged['ShareReport'] -and $step.PSObject.Properties['TitleNoShare']) { $title = [string]$step.TitleNoShare }
             [void]$plan.Add([pscustomobject]@{
-                    StepId = [string]$step.Id; StepTitle = [string]$step.Title; Group = [string]$step.Group
+                    StepId = [string]$step.Id; StepTitle = $title; Group = [string]$step.Group
                     Destructive = $destructive; Call = $call
                 })
         }
@@ -116,7 +119,9 @@ function New-GuiSession {
         Mode = $Mode; Phase = $phase; ToolRoot = $root; RitRoot = $RitRoot; ComputerName = $ComputerName
         RunRoot = ''; FindingsJson = ''; PriorFindings = ''
         PipeRc = 0; PowerRepairRan = $false; ReportRc = 0; ReportOpened = $false
-        ScannerOnly = $false; Shared = $false; ShareReport = ''; SharePDir = ''
+        # Shared = the report was really uploaded; ShareBuilt = the share step ran clean (with or without
+        # the upload), so the Desktop copy is refreshed either way (batch :online_share refreshes on exit 0).
+        ScannerOnly = $false; Shared = $false; ShareBuilt = $false; ShareReport = ''; SharePDir = ''
         Answers = $merged
         Interactive = [bool]$Interactive; Asked = @{}
         Plan = $plan; Index = 0
@@ -536,16 +541,24 @@ function Complete-GuiAction {
                     $status = 'Warn'; $text = 'Report was not produced.'
                 }
             }
-            'MarkShared' { $Session.Shared = (($ExitCode -eq 0) -and [bool]$Session.Answers['ShareReport']) }
+            'MarkShared' {
+                $Session.ShareBuilt = ($ExitCode -eq 0)
+                $Session.Shared = (($ExitCode -eq 0) -and [bool]$Session.Answers['ShareReport'])
+                if ($ExitCode -eq 0 -and -not [bool]$Session.Answers['ShareReport']) { $text = 'Report package built on this PC; nothing was uploaded (sharing is unticked).' }
+            }
             'MarkAfterScansReport' {
                 # Like the batch file: the exit code is not checked, only whether the file exists.
                 $f = $Session.RunRoot + '\report-after-scans.html'
                 if (Test-Path -LiteralPath $f -PathType Leaf) {
                     $Session.ShareReport = $f
                     $Session.SharePDir = $Session.RunRoot + '\after-scans\persistence'
-                    $status = 'Done'; $text = 'Sharing report-after-scans.html. The offline report.html is kept unchanged.'
+                    $status = 'Done'
+                    if ([bool]$Session.Answers['ShareReport']) { $text = 'Sharing report-after-scans.html. The offline report.html is kept unchanged.' }
+                    else { $text = 'Built report-after-scans.html (kept on this PC; sharing is unticked). The offline report.html is kept unchanged.' }
                 } else {
-                    $status = 'Warn'; $text = 'Could not build the after-scans report - sharing the offline report instead.'
+                    $status = 'Warn'
+                    if ([bool]$Session.Answers['ShareReport']) { $text = 'Could not build the after-scans report - sharing the offline report instead.' }
+                    else { $text = 'Could not build the after-scans report - the offline report is kept as it is.' }
                 }
             }
             default { throw ('Unknown after-hook: ' + $after) }

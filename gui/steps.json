@@ -196,7 +196,7 @@
       ]
     },
     {
-      "Id": "9o", "Title": "Share the report", "Group": "Report",
+      "Id": "9o", "Title": "Share the report", "TitleNoShare": "Build the report package (sharing unticked)", "Group": "Report",
       "Phases": ["ONLINE"],
       "Calls": [
         { "Script": "Submit-ConnectWiseReport.ps1",
@@ -215,7 +215,7 @@
       "Id": "9q", "Title": "Refresh the Desktop copy of the report", "Group": "Report",
       "Phases": ["ONLINE"],
       "Calls": [
-        { "Builtin": "DesktopCopyRefresh", "When": ["Flag:Shared", "Exists:{ShareReport}"], "SkipText": "The report was not shared, so the Desktop copy is unchanged.",
+        { "Builtin": "DesktopCopyRefresh", "When": ["Flag:ShareBuilt", "Exists:{ShareReport}"], "SkipText": "The share step did not finish cleanly, so the Desktop copy is unchanged.",
           "OnNonZero": "Warn", "NonZeroText": "Could not refresh the Desktop copy of report.html - the run folder has the updated one." }
       ]
     },

@@ -149,12 +149,33 @@ try {
     Check ($args9o -contains '-NoUpload') 'unticked: the online share step builds the package with -NoUpload'
     $s.RunRoot = Join-Path $work 'share-off'
     $fake = [pscustomobject]@{ Kind = 'Script'; Index = 0; Ask = ''; Title = 'Share the report'; Destructive = $false; Builtin = $null; ScriptPath = ''; Args = @(); StepId = '9o'; Call = $shareCall; Entry = [pscustomobject]@{ StepId = '9o'; StepTitle = 'Share the report'; Group = 'Report'; Destructive = $false; Call = $shareCall } }
-    [void](Complete-GuiAction -Session $s -Action $fake -ExitCode 0)
-    Check (-not [bool]$s.Shared) 'unticked: the run is not marked shared, so the Desktop copy is not refreshed'
+    $o = Complete-GuiAction -Session $s -Action $fake -ExitCode 0
+    Check (-not [bool]$s.Shared) 'unticked: the run is not marked shared (nothing was uploaded)'
+    Check ([bool]$s.ShareBuilt) 'unticked: the package step still ran clean, so the Desktop copy IS refreshed (review #16)'
+    Check ($o.Message -like '*nothing was uploaded*') 'unticked: the share step says nothing was uploaded'
+    $refresh = @(@((Get-GuiCatalog).Steps | Where-Object { $_.Id -eq '9q' })[0].Calls)[0]
+    Check (@($refresh.When) -contains 'Flag:ShareBuilt' -and @($refresh.When) -notcontains 'Flag:Shared') 'the Desktop refresh (9q) follows ShareBuilt, not Shared'
+    Check (Test-GuiCondition -Session $s -Condition 'Flag:ShareBuilt') 'unticked: the Desktop refresh condition holds'
+    $s9 = New-GuiSession -Mode Online -ToolRoot $ToolRoot -RitRoot (Join-Path $work 'share-off') -Answers @{ ShareReport = $false }
+    $t9o = @($s9.Plan | Where-Object { $_.StepId -eq '9o' })[0].StepTitle
+    Check ($t9o -notlike 'Shar*' -and $t9o -like '*unticked*') ('unticked: the stepper does not say "Sharing" for 9o (' + $t9o + ')')
+    $s9.RunRoot = Join-Path $work 'share-off'
+    $null = New-Item -ItemType Directory -Path $s9.RunRoot -Force
+    Set-Content -LiteralPath (Join-Path $s9.RunRoot 'report-after-scans.html') -Value '<html></html>' -Encoding ASCII
+    $call9r = @(@((Get-GuiCatalog).Steps | Where-Object { $_.Id -eq '9r' })[0].Calls)[0]
+    $fake9r = [pscustomobject]@{ Kind = 'Script'; Index = 0; Ask = ''; Title = 'r'; Destructive = $false; Builtin = $null; ScriptPath = ''; Args = @(); StepId = '9r'; Call = $call9r; Entry = [pscustomobject]@{ StepId = '9r'; StepTitle = 'r'; Group = 'Report'; Destructive = $false; Call = $call9r } }
+    $o = Complete-GuiAction -Session $s9 -Action $fake9r -ExitCode 0
+    Check ($o.Message -notlike 'Sharing*' -and $o.Message -like '*sharing is unticked*') 'unticked: the after-scans rebuild (9r) does not say "Sharing"'
+    Check ($s9.ShareReport -like '*report-after-scans.html') 'unticked: the Desktop refresh copies the after-scans report'
     $s = New-GuiSession -Mode Online -ToolRoot $ToolRoot -RitRoot (Join-Path $work 'share-on')
     $s.RunRoot = Join-Path $work 'share-on'
     [void](Complete-GuiAction -Session $s -Action $fake -ExitCode 0)
-    Check ([bool]$s.Shared) 'ticked: a successful share marks the run shared'
+    Check ([bool]$s.Shared -and [bool]$s.ShareBuilt) 'ticked: a successful share marks the run shared'
+    Check (@($s.Plan | Where-Object { $_.StepId -eq '9o' })[0].StepTitle -eq 'Share the report') 'ticked: 9o keeps its title'
+    $s = New-GuiSession -Mode Online -ToolRoot $ToolRoot -RitRoot (Join-Path $work 'share-fail')
+    $s.RunRoot = Join-Path $work 'share-fail'
+    [void](Complete-GuiAction -Session $s -Action $fake -ExitCode 1)
+    Check (-not [bool]$s.Shared -and -not [bool]$s.ShareBuilt) 'a failed share step refreshes nothing'
     $s = New-GuiSession -Mode Offline -ToolRoot $ToolRoot -RitRoot (Join-Path $work 'share-offline') -Answers @{ ShareReport = $true }
     $sub = @(@((Get-GuiCatalog).Steps | Where-Object { $_.Id -eq '9b' })[0].Calls)[0]
     Check (@(Expand-GuiArgs -Session $s -Template $sub.Args) -contains '-NoUpload') 'the offline half never uploads, whatever the tick box says'

@@ -242,7 +242,8 @@ function Initialize-Stepper {
         $id = [string]$step.Id
         if ($seen.ContainsKey($id)) { continue }
         $seen[$id] = $true
-        $e = [pscustomobject]@{ StepId = $id; StepTitle = [string]$step.Title }
+        # A step the mode runs shows its plan title (the share step reads differently when sharing is unticked).
+        $e = $(if ($inMode.ContainsKey($id)) { $inMode[$id] } else { [pscustomobject]@{ StepId = $id; StepTitle = [string]$step.Title } })
         $outside = -not $inMode.ContainsKey($id)
         # A row: a status dot, the step number and title, and the state underneath. Rounded, borderless
         # until the step is the one running or waiting, which gets an outline in its state colour.

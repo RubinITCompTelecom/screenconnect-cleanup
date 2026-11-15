@@ -37,6 +37,16 @@ try {
         if(@($reg.Findings|Where-Object Kind -eq 'RunKey').Count -lt 1){throw 'registry fixture did not produce a candidate'}
         if(@($reg.Items|Where-Object {$_.ValueKind -eq 'Unknown'}).Count){throw 'registry value kind is unknown'}
         if(@($reg.Items|Where-Object {$_.RegistryPath -like 'Registry::HKEY_USERS\*'}).Count -lt 1){throw 'loaded user hive registry values absent'}
+        # Review #20: only UserInitMprLogonScript in Environment is an autorun.
+        $envReg=Get-SccRegistryEvidence -ValueReader { param($path,$profile) if($path -like '*\Environment'){
+            [pscustomobject]@{Name='TEMP';Kind='ExpandString';Value='%USERPROFILE%\AppData\Local\Temp'}
+            [pscustomobject]@{Name='Path';Kind='ExpandString';Value='%USERPROFILE%\AppData\Local\Microsoft\WindowsApps;'}
+            [pscustomobject]@{Name='UserInitMprLogonScript';Kind='String';Value='wscript.exe C:\Users\Public\logon.vbs'} } }
+        $envFindings=@($envReg.Findings|Where-Object {$_.Target -like '*\Environment|*'})
+        if(@($envFindings|Where-Object {$_.Target -match '\|(TEMP|Path)$'}).Count){throw 'Environment TEMP/Path produced a false RunKey finding'}
+        if(@($envFindings|Where-Object {$_.Target -like '*|UserInitMprLogonScript'}).Count -lt 1){throw 'UserInitMprLogonScript logon script was not flagged'}
+        if(@($envReg.Items|Where-Object {$_.HivePath -like '*\Environment' -and $_.ValueName -ne 'UserInitMprLogonScript'}).Count){throw 'non-autorun Environment values were inventoried as autoruns'}
+        if(-not (Test-SccAutorunValue 'Registry::HKEY_USERS\S-1\Software\Microsoft\Windows\CurrentVersion\Run' 'TEMP')){throw 'Run key values must still be tested'}
 
         $startupDir=Join-Path $script:FixtureDir 'profile\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup'
         $null=New-Item -ItemType Directory -Force -Path $startupDir

@@ -120,6 +120,14 @@ function Get-SccProfileRoots {
     } catch {[void]$gaps.Add('ProfileList enumeration: '+$_.Exception.Message)}
     [pscustomobject]@{Profiles=@($roots.ToArray());Errors=@($gaps.ToArray())}
 }
+function Test-SccAutorunValue {
+    # Only UserInitMprLogonScript in a user's Environment key is an autorun;
+    # TEMP, TMP and Path always contain \AppData\ or \Temp\ and would turn
+    # into a false RunKey finding on every PC (review #20).
+    param([string]$KeyPath,[string]$ValueName)
+    if($KeyPath -match '(?i)\\Environment$'){return ($ValueName -ieq 'UserInitMprLogonScript')}
+    return $true
+}
 function Get-SccRegistryEvidence {
     param([scriptblock]$ValueReader=$null)
     $rows=New-Object System.Collections.ArrayList; $findings=New-Object System.Collections.ArrayList; $errors=New-Object System.Collections.ArrayList
@@ -149,6 +157,7 @@ function Get-SccRegistryEvidence {
                 foreach($valueRow in $values) {
                     $name=[string]$valueRow.Name; $kind=[string]$valueRow.Kind; $value=[string]$valueRow.Value
                     if($name -match '^PS'){continue}
+                    if(-not (Test-SccAutorunValue $keyPath $name)){continue}
                     $removalPath=$keyPath
                     $identity=$removalPath+'|'+$name
                     $row=[pscustomobject]@{RegistryPath=$removalPath;ValueName=$name;OriginalValue=$value;ValueKind=$kind;UserName=$(if($entry.Profile){$entry.Profile.Name}else{$null});SID=$(if($entry.Profile){$entry.Profile.Sid}else{$null});HivePath=$keyPath}
@@ -163,6 +172,7 @@ function Get-SccRegistryEvidence {
                     $kind=[string]$key.GetValueKind($name)
                     $value=[string]$key.GetValue($name,$null,[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
                     if($name -match '^PS'){continue}
+                    if(-not (Test-SccAutorunValue $keyPath $name)){continue}
                     $removalPath=$keyPath
                     $identity=$removalPath+'|'+$name
                     $row=[pscustomobject]@{RegistryPath=$removalPath;ValueName=[string]$name;OriginalValue=$value;ValueKind=$kind;UserName=$(if($entry.Profile){$entry.Profile.Name}else{$null});SID=$(if($entry.Profile){$entry.Profile.Sid}else{$null});HivePath=$keyPath}

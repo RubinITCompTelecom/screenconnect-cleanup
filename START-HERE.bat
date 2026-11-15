@@ -429,7 +429,7 @@ set "RESET_GPO="
 set /p RESET_GPO="    Back up, then reset local Group Policy folders? [y/N] "
 set "RESET_GPO_ARGS="
 if /i "!RESET_GPO!"=="y" set "RESET_GPO_ARGS=-ResetLocalGpo"
-powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Repair-PowerOptions.ps1" -Apply -Confirm:$false -WorkDir "!SCC_RUN_ROOT!" -ResultPath "!SCC_RUN_ROOT!\power-options-repair.json" !RESET_GPO_ARGS!
+powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Repair-PowerOptions.ps1" -Apply -WorkDir "!SCC_RUN_ROOT!" -ResultPath "!SCC_RUN_ROOT!\power-options-repair.json" !RESET_GPO_ARGS!
 set "POWER_REPAIR_RC=!errorlevel!"
 set "POWER_REPAIR_RAN=0"
 if exist "!SCC_RUN_ROOT!\power-options-repair.json" set "POWER_REPAIR_RAN=1"

@@ -118,7 +118,7 @@
       "Phases": ["ALL", "OFFLINE"],
       "Calls": [
         { "Script": "Repair-PowerOptions.ps1",
-          "Args": ["-Apply", "-Confirm:$false", "-WorkDir", "{RunRoot}", "-ResultPath", "{RunRoot}\\power-options-repair.json", "{@GpoArgs}"],
+          "Args": ["-Apply", "-WorkDir", "{RunRoot}", "-ResultPath", "{RunRoot}\\power-options-repair.json", "{@GpoArgs}"],
           "Ask": "PowerRepair", "When": ["Answer:PowerRepair"], "SkipText": "Not requested.",
           "After": "MarkPowerRepair", "OnNonZero": "WarnPipe", "NonZeroText": "Power-options repair failed - review power-options-repair.json." }
       ]

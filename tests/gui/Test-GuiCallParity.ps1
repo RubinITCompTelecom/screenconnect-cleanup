@@ -247,8 +247,8 @@ try {
     Check (-not (Has $g 'Show-PersistenceReview.ps1')) 'declining the review windows skips Show-PersistenceReview'
     Check (Has $g 'Invoke-AVUninstaller.ps1') 'AV uninstall runs only when asked'
     $pr = @($g.Trace | Where-Object { $_ -like 'Repair-PowerOptions.ps1|*' })[0]
-    Check ($pr -like '*-Apply -Confirm*false*' -and $pr -like '*-ResetLocalGpo') 'power repair with the GPO reset passes -ResetLocalGpo last, like the batch file'
-    if (-not ($pr -like '*-Apply -Confirm*false*' -and $pr -like '*-ResetLocalGpo')) { Write-Host ('  actual: ' + $pr) }
+    Check ($pr -like '*-Apply -WorkDir*' -and $pr -notlike '*-Confirm*' -and $pr -like '*-ResetLocalGpo') 'power repair with the GPO reset passes -ResetLocalGpo last (and no -Confirm string), like the batch file'
+    if (-not ($pr -like '*-Apply -WorkDir*' -and $pr -notlike '*-Confirm*' -and $pr -like '*-ResetLocalGpo')) { Write-Host ('  actual: ' + $pr) }
     Check ($s.PowerRepairRan -eq $false) 'PowerRepairRan reflects whether the repair wrote its result (stub wrote none)'
 
     # ============================================================ when a step fails

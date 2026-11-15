@@ -1179,7 +1179,7 @@ $stage8Result = Invoke-Stage -StageId 8 -StageName 'Snapshot (After)+Diff' -Skip
             Write-StageLog 'Repair-PowerOptions.ps1 is missing; the optional repair did not run.' 'Error'
             $powerOptionsRepairExitCode = 4
         } else {
-            $repairArgs = @('-Apply', '-Confirm:$false', '-WorkDir', $WorkDir, '-ResultPath', $powerOptionsRepairPath)
+            $repairArgs = @('-Apply', '-WorkDir', $WorkDir, '-ResultPath', $powerOptionsRepairPath)
             if ($resetLocalGpoConsent) { $repairArgs += '-ResetLocalGpo' }
             if ($AllowManagedDevice) { $repairArgs += '-AllowManagedDevice' }
             Write-StageLog 'Running the consented power-options repair before the after snapshot.'

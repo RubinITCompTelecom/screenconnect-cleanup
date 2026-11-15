@@ -82,6 +82,14 @@ function Test-IsInstalledAv {
 }
 
 # --- discovery ------------------------------------------------------------
+function Get-RegValue {
+    param($Item, [string]$Name)
+    if ($null -eq $Item) { return $null }
+    $prop = $Item.PSObject.Properties[$Name]
+    if ($null -eq $prop) { return $null }
+    return $prop.Value
+}
+
 function Get-InstalledAv {
     $keys = @(
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
@@ -92,18 +100,20 @@ function Get-InstalledAv {
     foreach ($key in $keys) {
         if (-not (Test-Path $key)) { continue }
         foreach ($p in (Get-ItemProperty -Path "$key\*" -ErrorAction SilentlyContinue)) {
-            $disp = $p.DisplayName
-            $unin = $p.UninstallString
+            # Many Uninstall subkeys have no DisplayName/UninstallString value;
+            # reading a missing property throws under the caller's strict mode.
+            $disp = Get-RegValue $p 'DisplayName'
+            $unin = Get-RegValue $p 'UninstallString'
             if ([string]::IsNullOrWhiteSpace($disp)) { continue }
             if (-not (Test-IsInstalledAv $disp)) { continue }
             if ([string]::IsNullOrWhiteSpace($unin)) { continue }
             $found += [pscustomobject]@{
                 DisplayName         = $disp
                 UninstallString     = $unin
-                QuietUninstallString = if ($p.PSObject.Properties['QuietUninstallString']) { $p.QuietUninstallString } else { $null }
-                InstallLocation     = if ($p.PSObject.Properties['InstallLocation']) { $p.InstallLocation } else { $null }
-                Publisher           = if ($p.PSObject.Properties['Publisher']) { $p.Publisher } else { $null }
-                Version             = if ($p.PSObject.Properties['DisplayVersion']) { $p.DisplayVersion } else { $null }
+                QuietUninstallString = Get-RegValue $p 'QuietUninstallString'
+                InstallLocation     = Get-RegValue $p 'InstallLocation'
+                Publisher           = Get-RegValue $p 'Publisher'
+                Version             = Get-RegValue $p 'DisplayVersion'
                 RegistryKey         = $key
             }
         }
@@ -417,6 +427,28 @@ function Invoke-WithSweep {
     return $r
 }
 
+function Invoke-DiscoveredAvUninstall {
+    # Discovery mode. Get-InstalledAv returns 0, 1 or many products; PowerShell
+    # unrolls a one-item (or empty) return, and the caller (sc-cleanup.ps1)
+    # runs this script under Set-StrictMode, where .Count on a lone object or
+    # on $null throws. Always re-wrap in @(...) before counting.
+    $found = @()
+    $av = @(Get-InstalledAv)
+    if ($av.Count -eq 0) {
+        Say 'No third-party antivirus/uninstallable security product detected (excluding Windows Defender / MSRT).' 'Green'
+        $found += [pscustomobject]@{ DisplayName = $null; UninstallString = $null; Status = 'NoneFound' }
+    } else {
+        Say ("Detected $($av.Count) installed AV product(s):") 'Green'
+        foreach ($a in $av) { Say ("  - " + $a.DisplayName + "  (" + $a.Publisher + ")") 'White' }
+        if ($ListOnly) {
+            $found = $av
+        } else {
+            foreach ($a in $av) { $found += (Invoke-WithSweep $a) }
+        }
+    }
+    return $found
+}
+
 if ($ToolPath) {
     # Explicit mode: open one specific uninstaller.
     if (-not (Test-Path -LiteralPath $ToolPath)) {
@@ -435,19 +467,7 @@ if ($ToolPath) {
         $results += (Invoke-WithSweep $prod)
     }
 } else {
-    $av = Get-InstalledAv
-    if ($av.Count -eq 0) {
-        Say 'No third-party antivirus/uninstallable security product detected (excluding Windows Defender / MSRT).' 'Green'
-        $results += [pscustomobject]@{ DisplayName = $null; UninstallString = $null; Status = 'NoneFound' }
-    } else {
-        Say ("Detected $($av.Count) installed AV product(s):") 'Green'
-        foreach ($a in $av) { Say ("  - " + $a.DisplayName + "  (" + $a.Publisher + ")") 'White' }
-        if ($ListOnly) {
-            $results = $av
-        } else {
-            foreach ($a in $av) { $results += (Invoke-WithSweep $a) }
-        }
-    }
+    $results = @(Invoke-DiscoveredAvUninstall)
 }
 
 # Emit JSON for the report / caller.

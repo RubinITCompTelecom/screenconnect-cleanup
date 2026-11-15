@@ -3,7 +3,15 @@
 Semantic versions. The deploy zip is named `screenconnect-cleanup-v<VER>.zip`
 and carries a `VERSION` file so each build is self-identifying.
 
-## [Unreleased] - README rewrite, one-liner installer fix
+## [Unreleased] - README rewrite, one-liner installer fix, share tick box
+- **Window: "Share the sanitized report" tick box** on the Online choice, ticked by default. Unticked, the
+  share step runs with `-NoUpload`: the package is built locally, nothing is uploaded, the run is not marked
+  shared and the summary says so. The Offline half still never uploads. Console launchers are unchanged.
+- **The MicroBin copy is anonymous**: `ComputerName` and `RunId` (which starts with the computer name) become a
+  short hash `PC-xxxxxxxxxx`, and the PC's own `LocalAddress`/`LocalPort` are left out of the connection records.
+  The remote (scammer-side) address stays. `connectwise-report.zip` and `report.html` on the PC keep the full details.
+- Tests: `Test-GuiAsk.ps1` (default, ticked, unticked, Offline), `test_microbin_report_upload.ps1` (anonymous id,
+  no local address, remote address kept).
 - **Fix: the `irm ... | iex` one-liner failed on the GUI releases** ("Bundle missing VERSION"):
   `install-latest.ps1` expected VERSION and START-HERE.bat at the top of the zip, which since
   1.8.12-gui-alpha.3 holds only START-HERE-GUI.bat plus `files\`. It now recognises both layouts and

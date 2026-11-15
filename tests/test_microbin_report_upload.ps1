@@ -72,6 +72,9 @@ $fixture = [ordered]@{
                     SignatureStatus = 'NotSigned'
                 }
             )
+            Connections = @(
+                [ordered]@{ LocalAddress = '192.168.77.5'; LocalPort = 51234; RemoteAddress = '203.0.113.9'; RemotePort = 443; State = 'Established' }
+            )
         }
     )
 }
@@ -280,7 +283,10 @@ try {
         $bodyText = [string]$fields.content
         $bodyJson = $null
         try { $bodyJson = $bodyText | ConvertFrom-Json } catch { }
-        Check 'paste content is valid sanitized report JSON' ($null -ne $bodyJson -and [int]$bodyJson.SchemaVersion -eq 2 -and [string]$bodyJson.ComputerName -eq 'CLIENT-99') $bodyText
+        Check 'paste content is valid sanitized report JSON' ($null -ne $bodyJson -and [int]$bodyJson.SchemaVersion -eq 2) $bodyText
+        Check 'paste has an anonymous PC id instead of the computer name' ($null -ne $bodyJson -and [string]$bodyJson.ComputerName -match '^PC-[0-9a-f]{10}$' -and $bodyText -notmatch 'CLIENT-99') $bodyText
+        Check 'paste has no local network address or port' ($bodyText -notmatch 'LocalAddress|LocalPort|192\.168\.77\.5') $bodyText
+        Check 'paste keeps the scammer-side remote address' ($bodyText -match '203\.0\.113\.9') $bodyText
         Check 'paste carries the operator incident context' ($null -ne $bodyJson -and [string]$bodyJson.IncidentContext.Authorization -eq 'Authorized' -and [string]$bodyJson.IncidentContext.Delivery -eq 'Other: SMS lure') $bodyText
         Check 'paste has no screenshot or VirusTotal fields' ($bodyText -notmatch '(?i)screenshot|virustotal') $bodyText
         Check 'context description is never echoed to the console' ($text -notmatch 'SMS lure') $text

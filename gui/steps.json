@@ -203,7 +203,7 @@
           "Args": ["-FindingsJson", "{FindingsJson}", "-WorkDir", "{RunRoot}", "{@ReportArg}",
                    "-PersistenceInventory", "{SharePDir}\\inventory.json",
                    "-PersistenceRemoval", "{SharePDir}\\removal.json",
-                   "-PersistenceResult", "{SharePDir}\\result.json"],
+                   "-PersistenceResult", "{SharePDir}\\result.json", "{@ShareArgs}"],
           "When": ["Not:ScannerOnly", "Has:FindingsJson"],
           "SkipText": "Nothing to share: scanner-only run, or the offline-half run has no findings.json.",
           "OnMissing": "WarnPipeSkip", "MissingMessage": "Submit-ConnectWiseReport.ps1 missing - the report was not shared.",

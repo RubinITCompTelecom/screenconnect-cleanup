@@ -138,6 +138,27 @@ try {
     $seen = Invoke-Walk $s $yes
     Check (@($seen | Where-Object { $_ -like 'ASK:*' }).Count -eq 0) 'detect only asks nothing'
 
+    Write-Host 'Online share tick box (ShareReport)' -ForegroundColor Cyan
+    $shareCall = @(@((Get-GuiCatalog).Steps | Where-Object { $_.Id -eq '9o' })[0].Calls)[0]
+    $s = New-GuiSession -Mode Online -ToolRoot $ToolRoot -RitRoot (Join-Path $work 'share-default')
+    Check ([bool]$s.Answers['ShareReport']) 'sharing is ticked by default'
+    $args9o = @(Expand-GuiArgs -Session $s -Template $shareCall.Args)
+    Check ($args9o -notcontains '-NoUpload') 'ticked: the online share step uploads (no -NoUpload)'
+    $s = New-GuiSession -Mode Online -ToolRoot $ToolRoot -RitRoot (Join-Path $work 'share-off') -Answers @{ ShareReport = $false }
+    $args9o = @(Expand-GuiArgs -Session $s -Template $shareCall.Args)
+    Check ($args9o -contains '-NoUpload') 'unticked: the online share step builds the package with -NoUpload'
+    $s.RunRoot = Join-Path $work 'share-off'
+    $fake = [pscustomobject]@{ Kind = 'Script'; Index = 0; Ask = ''; Title = 'Share the report'; Destructive = $false; Builtin = $null; ScriptPath = ''; Args = @(); StepId = '9o'; Call = $shareCall; Entry = [pscustomobject]@{ StepId = '9o'; StepTitle = 'Share the report'; Group = 'Report'; Destructive = $false; Call = $shareCall } }
+    [void](Complete-GuiAction -Session $s -Action $fake -ExitCode 0)
+    Check (-not [bool]$s.Shared) 'unticked: the run is not marked shared, so the Desktop copy is not refreshed'
+    $s = New-GuiSession -Mode Online -ToolRoot $ToolRoot -RitRoot (Join-Path $work 'share-on')
+    $s.RunRoot = Join-Path $work 'share-on'
+    [void](Complete-GuiAction -Session $s -Action $fake -ExitCode 0)
+    Check ([bool]$s.Shared) 'ticked: a successful share marks the run shared'
+    $s = New-GuiSession -Mode Offline -ToolRoot $ToolRoot -RitRoot (Join-Path $work 'share-offline') -Answers @{ ShareReport = $true }
+    $sub = @(@((Get-GuiCatalog).Steps | Where-Object { $_.Id -eq '9b' })[0].Calls)[0]
+    Check (@(Expand-GuiArgs -Session $s -Template $sub.Args) -contains '-NoUpload') 'the offline half never uploads, whatever the tick box says'
+
     Write-Host 'Answers are validated' -ForegroundColor Cyan
     $s = New-Walk 'Full' -Interactive
     $threw = $false; try { Set-GuiAnswer -Session $s -Ask 'KeepSelection' -Values @{ Avu = $true } } catch { $threw = $true }

@@ -48,6 +48,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $script:PackagePath = $null
 $script:StageDir = $null
+# True only while building the copy that goes to MicroBin: the computer name and the PC's own
+# network address are left out of that copy. The local package (zip) keeps them.
+$script:AnonymizeForShare = $false
 
 # ---------------------------------------------------------------------------
 # Incident-context constants. The closed sets are shared by convention with
@@ -126,13 +129,15 @@ function New-SafeFileRecord {
 function New-SafeConnectionRecord {
     param([object]$Connection)
     if ($null -eq $Connection) { return $null }
-    return [ordered]@{
-        LocalAddress  = Convert-ReportScalar (Get-Field $Connection 'LocalAddress')
-        LocalPort     = Convert-ReportScalar (Get-Field $Connection 'LocalPort')
-        RemoteAddress = Convert-ReportScalar (Get-Field $Connection 'RemoteAddress')
-        RemotePort    = Convert-ReportScalar (Get-Field $Connection 'RemotePort')
-        State         = Convert-ReportScalar (Get-Field $Connection 'State')
+    $record = [ordered]@{}
+    if (-not $script:AnonymizeForShare) {
+        $record['LocalAddress'] = Convert-ReportScalar (Get-Field $Connection 'LocalAddress')
+        $record['LocalPort']    = Convert-ReportScalar (Get-Field $Connection 'LocalPort')
     }
+    $record['RemoteAddress'] = Convert-ReportScalar (Get-Field $Connection 'RemoteAddress')
+    $record['RemotePort']    = Convert-ReportScalar (Get-Field $Connection 'RemotePort')
+    $record['State']         = Convert-ReportScalar (Get-Field $Connection 'State')
+    return $record
 }
 
 function Assert-ContextLabel {
@@ -309,6 +314,16 @@ function New-SafeOtherTarget {
     }
 }
 
+function Get-AnonymousPcId {
+    # Stable per run, not reversible by reading the report: a hash of the computer name and run id.
+    # The run id is the detector's output folder name, which starts with the computer name, so it is replaced too.
+    param([object]$Data)
+    $seed = [string](Get-Field $Data 'ComputerName') + '|' + [string](Get-Field $Data 'RunId')
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $hash = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($seed)) } finally { $sha.Dispose() }
+    return 'PC-' + (([BitConverter]::ToString($hash) -replace '-', '').Substring(0, 10).ToLowerInvariant())
+}
+
 function New-SafeReport {
     param([object]$Data)
     $screen = Get-Field $Data 'ScreenConnect'
@@ -387,8 +402,8 @@ function New-SafeReport {
         ReportType      = 'Potential malicious or fraudulent ScreenConnect activity'
         GeneratedUtc    = Convert-ReportScalar (Get-Field $Data 'GeneratedUtc')
         ToolVersion     = Convert-ReportScalar (Get-Field $Data 'Version')
-        RunId           = Convert-ReportScalar (Get-Field $Data 'RunId')
-        ComputerName    = Convert-ReportScalar (Get-Field $Data 'ComputerName')
+        RunId           = $(if ($script:AnonymizeForShare) { Get-AnonymousPcId $Data } else { Convert-ReportScalar (Get-Field $Data 'RunId') })
+        ComputerName    = $(if ($script:AnonymizeForShare) { Get-AnonymousPcId $Data } else { Convert-ReportScalar (Get-Field $Data 'ComputerName') })
         OSCaption       = Convert-ReportScalar (Get-Field $Data 'OSCaption')
         IncidentContext = [ordered]@{
             Authorization = $contextAuthorization
@@ -892,7 +907,10 @@ try {
         } else {
             try {
                 $microBinPassword = Get-MicroBinUploaderPassword
-                $pasteUrl = Invoke-MicroBinUpload -Content $reportJson -Password $microBinPassword
+                # The shared copy is built separately: anonymous PC id, no local network address.
+                $script:AnonymizeForShare = $true
+                try { $shareJson = (New-SafeReport $data) | ConvertTo-Json -Depth 20 } finally { $script:AnonymizeForShare = $false }
+                $pasteUrl = Invoke-MicroBinUpload -Content $shareJson -Password $microBinPassword
                 Write-Host ('MICROBIN UPLOAD: ' + $pasteUrl)
                 # Only a successful upload reaches this point, so only a
                 # successful upload can annotate the HTML report. Annotation

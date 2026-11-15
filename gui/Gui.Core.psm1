@@ -90,6 +90,8 @@ function New-GuiSession {
     $merged = @{
         ScanKvrt = $true; ScanEset = $true; ScanMalwarebytes = $true; OpenReview = $true
         Avu = $false; PowerRepair = $false; ResetGpo = $false
+        # Online half: share the sanitized report to MicroBin (the window's tick box, ticked by default).
+        ShareReport = $true
         KeepIdentifiers = @()
     }
     if ($Answers) { foreach ($k in $Answers.Keys) { $merged[$k] = $Answers[$k] } }
@@ -263,6 +265,8 @@ function Resolve-GuiListToken {
             return $out
         }
         'SubmitArgs'    { if ($phase -eq 'OFFLINE') { return @('-NoUpload') }; return @() }
+        # Online share step: the technician unticked "Share the sanitized report" -> build the package, upload nothing.
+        'ShareArgs'     { if (-not [bool]$Session.Answers['ShareReport']) { return @('-NoUpload') }; return @() }
         'KeepArgs' {
             $ids = @($Session.Answers['KeepIdentifiers'] | Where-Object { $_ })
             if ($ids.Count -gt 0) { return @('-KeepIdentifier', ($ids -join ',')) }
@@ -532,7 +536,7 @@ function Complete-GuiAction {
                     $status = 'Warn'; $text = 'Report was not produced.'
                 }
             }
-            'MarkShared' { $Session.Shared = ($ExitCode -eq 0) }
+            'MarkShared' { $Session.Shared = (($ExitCode -eq 0) -and [bool]$Session.Answers['ShareReport']) }
             'MarkAfterScansReport' {
                 # Like the batch file: the exit code is not checked, only whether the file exists.
                 $f = $Session.RunRoot + '\report-after-scans.html'

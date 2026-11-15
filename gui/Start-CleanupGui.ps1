@@ -95,7 +95,7 @@ $xamlText = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'MainWindow.xaml'))
 $win = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader ([xml]$xamlText)))
 $ui = @{}
 $controlNames = 'TitleText', 'InfoText', 'RunText', 'BtnOpenRitRoot','StepperHost', 'StartPanel',
-'RbOffline', 'RbOnline', 'RbDetect', 'RbStage', 'BtnStart', 'PriorRunsText',
+'RbOffline', 'RbOnline', 'RbDetect', 'RbStage', 'SharePanel', 'CbShare', 'BtnStart', 'PriorRunsText',
 'RunPanel', 'StatusTitle', 'StatusDetail', 'Busy', 'Banner', 'BannerText', 'ReviewBar', 'ReviewSummary', 'BtnReviewContinue',
 'CardsHost', 'BtnOpenReport', 'BtnOpenRun', 'BtnRestart', 'BtnNewRun', 'BtnCopy', 'BtnOpenLog', 'ConsoleBox',
 'RowConsole', 'ColStepper', 'LinkRubinIt', 'LinkPupontech', 'RootGrid', 'HeaderCard', 'StatusCard'
@@ -780,12 +780,16 @@ function Set-PreviewMode {
 function Start-Run {
     param([string]$ModeName)
     $script:Finished = $false
-    $sess = New-GuiSession -Mode $ModeName -ToolRoot $ToolRoot -RitRoot $RitRoot -Interactive
+    # The share tick box (Online only, ticked by default). Test hook: a canned "ShareReport" answer stands in for it.
+    $share = [bool]$ui.CbShare.IsChecked
+    $ta = Get-TestAnswer 'ShareReport'
+    if ($null -ne $ta) { $share = [bool]$ta }
+    $sess = New-GuiSession -Mode $ModeName -ToolRoot $ToolRoot -RitRoot $RitRoot -Interactive -Answers @{ ShareReport = $share }
     $prior = $null
     if ($ModeName -eq 'Online') {
         $prior = Find-GuiPriorRun -Session $sess
         if ($prior) {
-            $r = Show-Dialog -Id 'ContinuePrior' -Title 'Continue the offline run?' -Message ('A finished offline-half run was found for this PC:' + "`r`n" + $prior.RunRoot + "`r`n`r`nContinue that run? Its report is shared at the end. Otherwise a scanner-only run starts and nothing is shared.") -Buttons @(
+            $r = Show-Dialog -Id 'ContinuePrior' -Title 'Continue the offline run?' -Message ('A finished offline-half run was found for this PC:' + "`r`n" + $prior.RunRoot + "`r`n`r`nContinue that run? " + $(if ($share) { 'Its report is shared at the end.' } else { 'Its report is updated on this PC but not shared (the share box is unticked).' }) + " Otherwise a scanner-only run starts and nothing is shared.") -Buttons @(
                 @{ Text = 'Continue that run'; Value = 'continue' }, @{ Text = 'Start a scanner-only run'; Value = 'new' })
             if ($r -and $r.Value -eq 'new') { $prior = $null }
         }
@@ -998,6 +1002,7 @@ function Show-RunSummary {
         $s = $res[$sid]
         if (-not $s) { Add-SummaryLine 'Report share' 'not reached' 'WarningFg'; continue }
         if ($s.Status -eq 'Skipped') { Add-SummaryLine 'Report share' ('not shared - ' + $s.Message) 'Muted' }
+        elseif ($sid -eq '9o' -and $s.Status -eq 'Done' -and -not [bool]$Sess.Answers['ShareReport']) { Add-SummaryLine 'Report share' 'not shared - you unticked sharing. The report and connectwise-report.zip are on this PC only.' 'Muted' }
         elseif ($s.Status -ne 'Done') { Add-SummaryLine 'Report share' ('failed - ' + $s.Message + ' The local report is kept.') 'DangerFg' }
         elseif ($script:ShareUrl) { Add-SummaryLine 'Report shared - paste link' $script:ShareUrl -Selectable }
         elseif ($Sess.Phase -eq 'OFFLINE') { Add-SummaryLine 'Report' 'package built on this PC, not uploaded (the Online half shares it)' 'Muted' }
@@ -1025,6 +1030,7 @@ function Write-ResultFile {
             StartPanelVisible = ($ui.StartPanel.Visibility -eq 'Visible'); RunPanelVisible = ($ui.RunPanel.Visibility -eq 'Visible')
             KeepIdentifiers = @($script:Session.Answers['KeepIdentifiers'])
             ShareUrl = $script:ShareUrl
+            ShareReport = [bool]$script:Session.Answers['ShareReport']
             # A TextBlock built from Runs (bold label + value) reports no .Text, so read its Runs.
             CardTexts = @($ui.CardsHost.Children | ForEach-Object {
                     if ($_ -is [System.Windows.Controls.TextBlock]) { $(if ($_.Inlines.Count -gt 0) { (@($_.Inlines | ForEach-Object { if ($_ -is [System.Windows.Documents.Run]) { $_.Text } }) -join '') } else { $_.Text }) }
@@ -1150,7 +1156,12 @@ if ($SelfTest) {
 $ui.TitleText.Text = 'ScreenConnect Cleanup  v' + $script:Version
 $ui.RbOffline.Tag = 'Offline'; $ui.RbOnline.Tag = 'Online'; $ui.RbDetect.Tag = 'Detect'; $ui.RbStage.Tag = 'Stage'
 foreach ($rb in $ui.RbOffline, $ui.RbOnline, $ui.RbDetect, $ui.RbStage) {
-    $rb.add_Checked({ param($s, $e) if (-not $script:Session -or $script:Finished) { Set-PreviewMode ([string]$s.Tag) } })
+    $rb.add_Checked({
+            param($s, $e)
+            if (-not $script:Session -or $script:Finished) { Set-PreviewMode ([string]$s.Tag) }
+            # The share tick box belongs to the Online half only.
+            $ui.SharePanel.Visibility = $(if ([string]$s.Tag -eq 'Online') { 'Visible' } else { 'Collapsed' })
+        })
 }
 Set-PreviewMode 'Offline'
 Update-HeaderButtons

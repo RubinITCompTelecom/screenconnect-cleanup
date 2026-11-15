@@ -288,7 +288,10 @@ function Get-SccGenericEvidence {
     param([string]$Name,[scriptblock]$Collector)
     try {
         $rows=foreach($item in @(& $Collector)) {
-            if($item -is [string]){$item;continue}
+            # Strings from Get-Content carry PSPath/PSProvider note properties;
+            # ConvertTo-Json -Depth 12 walks the provider graph for every line
+            # and can hang the worker. Emit a plain .NET string instead.
+            if($item -is [string]){$item.ToString();continue}
             $record=[ordered]@{}
             foreach($property in $item.PSObject.Properties){$record[$property.Name]=ConvertTo-SccEvidenceScalar $property.Value}
             [pscustomobject]$record
@@ -297,6 +300,12 @@ function Get-SccGenericEvidence {
     } catch {
         [pscustomobject]@{Items=@();Errors=@($Name+': '+$_.Exception.Message)}
     }
+}
+function Get-SccHostsLines {
+    # [IO.File]::ReadAllLines returns plain strings. Get-Content decorates each
+    # line with provider note properties that explode at ConvertTo-Json.
+    param([string]$Path)
+    foreach($line in [IO.File]::ReadAllLines($Path)){if($line -and $line -notmatch '^\s*#'){[string]$line}}
 }
 function Get-SccEventRecords {
     param([hashtable]$Filter,[int]$Maximum)
@@ -361,7 +370,7 @@ function Get-SccPersistenceInventory {
       LocalAdministrators={Get-LocalGroupMember -Group 'Administrators' -ErrorAction Stop | Select-Object Name,ObjectClass,PrincipalSource}
       RemoteTools={Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*','HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction Stop | Where-Object {(Get-SccPropertyValue $_ 'DisplayName') -match '(?i)AnyDesk|TeamViewer|Splashtop|ScreenConnect|ConnectWise|RustDesk|UltraVNC|TightVNC|RealVNC|LogMeIn|Ammyy|Supremo|Chrome Remote|Atera|NetSupport|RemotePC|Radmin|DWService|MeshAgent|Zoho.?Assist|Action1|Level\.io|Datto|Kaseya|N-able|Syncro|Pulseway'} | Select-Object DisplayName,DisplayVersion,InstallDate,Publisher}
       RemoteToolServices={Get-Service -ErrorAction Stop | Where-Object { $serviceName=(Get-SccPropertyValue $_ 'Name'); $serviceDisplay=(Get-SccPropertyValue $_ 'DisplayName'); $remotePattern='(?i)AnyDesk|TeamViewer|ScreenConnect|ConnectWise|RustDesk|VNC|Splashtop|Atera|Kaseya|MeshAgent'; ([string]$serviceName -match $remotePattern) -or ([string]$serviceDisplay -match $remotePattern) } | Select-Object Name,DisplayName,Status,StartType}
-      Hosts={Get-Content (Join-Path $env:SystemRoot 'System32\drivers\etc\hosts') -ErrorAction Stop | Where-Object {$_ -and $_ -notmatch '^\s*#'}}
+      Hosts={Get-SccHostsLines -Path (Join-Path $env:SystemRoot 'System32\drivers\etc\hosts')}
     }
     foreach($name in $collectors.Keys){
         Write-Host ('SCC_PERSISTENCE_SECTION|'+$name)

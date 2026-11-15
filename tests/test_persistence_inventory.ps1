@@ -57,6 +57,20 @@ try {
             [pscustomobject]@{Time=[datetime]::SpecifyKind([datetime]'2020-01-01 01:00:00',[DateTimeKind]::Utc);Reference=[version]'1.2';Values=@('a','b')}
         }
         if($projection.Items[0].Reference -isnot [string] -or $projection.Items[0].Reference -ne '1.2' -or $projection.Items[0].Time -ne '2020-01-01T01:00:00.0000000Z'){throw 'generic evidence retained a native object graph or non-ISO timestamp'}
+        # Review #6: a live hosts line must serialize as a plain string. Get-Content
+        # strings carry PSProvider note properties that explode at -Depth 12.
+        $hostsFixture=Join-Path $script:FixtureDir 'hosts'
+        [IO.File]::WriteAllLines($hostsFixture,[string[]]@('# comment','','127.0.0.1 example.invalid','  # indented comment'))
+        $hostsLines=@(Get-SccHostsLines -Path $hostsFixture)
+        if($hostsLines.Count -ne 1 -or $hostsLines[0] -ne '127.0.0.1 example.invalid'){throw 'hosts reader did not keep exactly the live line'}
+        if($hostsLines[0].PSObject.Properties['PSProvider']){throw 'hosts reader returned a provider-decorated string'}
+        $hostsEvidence=Get-SccGenericEvidence -Name 'Hosts' -Collector {Get-SccHostsLines -Path $hostsFixture}
+        $hostsJson=ConvertTo-Json -InputObject ([pscustomobject]@{Items=$hostsEvidence.Items}) -Depth 12 -Compress
+        if($hostsEvidence.Errors.Count -or $hostsJson.Length -gt 200){throw ('hosts evidence serialized too large: '+$hostsJson.Length+' chars')}
+        # The generic wrapper must also flatten decorated strings from any collector.
+        $decorated=Get-SccGenericEvidence -Name 'Decorated' -Collector {Get-Content -LiteralPath $hostsFixture | Where-Object {$_ -and $_ -notmatch '^\s*#'}}
+        $decoratedJson=ConvertTo-Json -InputObject ([pscustomobject]@{Items=$decorated.Items}) -Depth 12 -Compress
+        if($decorated.Items.Count -ne 1 -or $decoratedJson.Length -gt 200){throw ('Get-Content string was not flattened: '+$decoratedJson.Length+' chars')}
         function Get-WinEvent {
             [CmdletBinding()]param([hashtable]$FilterHashtable,[int]$MaxEvents)
             if($FilterHashtable.LogName -eq 'fixture-records'){[pscustomobject]@{TimeCreated=[datetime]'2020-01-01';Id=1;Message='fixture event'};return}

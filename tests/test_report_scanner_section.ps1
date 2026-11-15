@@ -187,5 +187,62 @@ $html7 = Get-Content -LiteralPath $out7 -Raw
 Check 'report7 malformed scanner results are reported' ($html7.Contains('Could not load scanner results'))
 Check 'report7 parser exception cannot inject an HTML element' (-not $html7.Contains('<img src=x onerror=alert(4)>'))
 
+# 8. Exactly one item per section. Windows PowerShell 5.1 unrolls a
+# one-element array returned from Get-Items / Get-KvPairs, and a lone
+# PSCustomObject has no .Count, so these tables used to vanish.
+$oneFindings = @{
+    ComputerName = 'ONE-ITEM-PC'
+    OSCaption    = 'Windows'
+    TargetsSelected = @('screenconnect')
+    TargetsSource = 'embedded'
+    ScreenConnect = @{
+        Instances = @(@{
+            Identifier = 'one-item-instance'
+            Key = 'one-item-instance'
+            Sources = @('service')
+            CustomProperties = @{ OnlyCustomKey = 'only-custom-value' }
+            UnknownParams = @{ OnlyUnknownKey = 'only-unknown-value' }
+            Processes = @(@{ ProcessId = 4242; ParentProcessId = 4; Name = 'OnlyProc.exe'; ExecutablePath = 'C:\only\OnlyProc.exe'; StartedUtc = '2026-11-01T00:00:00Z' })
+            Connections = @(@{ LocalAddress = '10.0.0.9'; LocalPort = 50123; RemoteAddress = '203.0.113.77'; RemotePort = 8041; State = 'Established' })
+            ServiceInstallEvents = @(@{ TimeUtc = '2026-11-01T00:00:01Z'; Message = 'only-service-install-event' })
+            ConfigFiles = @(@{ Name = 'only.config'; Path = 'C:\only\only.config'; ModifiedUtc = '2026-11-01T00:00:02Z' })
+        })
+        ParseIssues = @(@{ Identifier = 'one-issue'; InstallDir = 'C:\only'; Issue = 'only issue'; ConfigFilesSeen = @('only-seen.config'); KeysSeen = @('onlykey') })
+        Historical  = @()
+        RawFilesSaved = @()
+    }
+    OtherTargets = @()
+}
+$oneFindingsJson = Join-Path $tmp 'one-item-findings.json'
+$oneFindings | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $oneFindingsJson -Encoding UTF8 -NoNewline
+$oneThreatPath = Join-Path $tmp 'scanner-ONE-findings.json'
+@{ Scanner = 'ONE'; NotParseable = $false; Threats = @(@{ ThreatName = 'Only/Threat.A'; ThreatType = 'trojan'; Object = 'C:\only\bad.exe'; Action = 'deleted' }); ThreatCount = 1 } |
+    ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $oneThreatPath -Encoding UTF8 -NoNewline
+$oneScannerJson = Join-Path $tmp 'one-scanner_results.json'
+ConvertTo-Json -Depth 5 -InputObject @(@{ Tool = 'one.exe'; Scanner = 'ONE'; Status = 'Completed'; ExitCode = 0; FindingsPath = $oneThreatPath }) |
+    Set-Content -LiteralPath $oneScannerJson -Encoding UTF8 -NoNewline
+$oneDiffJson = Join-Path $tmp 'one-diff.json'
+@{
+    Verdict = 'CLEAN'
+    BeforeCollectionComplete = $true
+    AfterCollectionComplete = $true
+    BeforeCollectionErrors = @()
+    AfterCollectionErrors = @()
+    Sections = @(@{ Section = 'Services'; Kind = 'stable'; Removed = @(@{ Name = 'OnlyRemovedSvc' }); Added = @(); Changed = @() })
+} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $oneDiffJson -Encoding UTF8 -NoNewline
+$out8 = Join-Path $tmp 'report8.html'
+& $reportScript -FindingsJson $oneFindingsJson -OutputPath $out8 -DiffPath $oneDiffJson -ScannerSummary $oneScannerJson *> $null
+$html8 = Get-Content -LiteralPath $out8 -Raw
+Check 'report8 one custom property renders its table' ($html8.Contains('<h4>Custom properties') -and $html8.Contains('only-custom-value'))
+Check 'report8 one unknown parameter renders its table' ($html8.Contains('<h4>Unrecognized launch parameters</h4>') -and $html8.Contains('only-unknown-value'))
+Check 'report8 one process renders its table' ($html8.Contains('<h4>Running processes at scan time</h4>') -and $html8.Contains('OnlyProc.exe'))
+Check 'report8 one connection renders its table' ($html8.Contains('<h4>Network connections at scan time</h4>') -and $html8.Contains('203.0.113.77'))
+Check 'report8 one service-install event renders its table' ($html8.Contains('<h4>Related service-install events</h4>') -and $html8.Contains('only-service-install-event'))
+Check 'report8 one config file renders its table' ($html8.Contains('<h4>Config files captured') -and $html8.Contains('C:\only\only.config'))
+Check 'report8 one parse-issue config file seen is listed' ($html8.Contains('Config files seen: only-seen.config'))
+Check 'report8 one parse-issue key seen is listed' ($html8.Contains('Keys seen in blob: onlykey'))
+Check 'report8 one scanner threat renders its detail table' ($html8.Contains('ONE - 1 threat(s) detected') -and $html8.Contains('Only/Threat.A'))
+Check 'report8 diff cell shows 1 removed, not -' ($html8.Contains('<td>Services</td><td>stable</td><td>1</td><td>0</td><td>0</td>'))
+
 Write-Host ""
 if ($failures -eq 0) { Write-Host "ALL REPORT TESTS PASSED" } else { Write-Host "$failures REPORT TEST(S) FAILED"; exit 1 }

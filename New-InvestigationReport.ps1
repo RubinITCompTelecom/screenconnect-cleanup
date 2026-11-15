@@ -103,7 +103,7 @@ function FmtBool {
 function FmtList {
     # Escaped, joined text for an array-ish value.
     param($Value, [string]$Sep = ', ', [string]$Empty = '-')
-    $items = Get-Items $Value
+    $items = @(Get-Items $Value)
     if ($items.Count -eq 0) { return (Encode-Html $Empty) }
     $strs = New-Object System.Collections.ArrayList
     foreach ($it in $items) {
@@ -509,7 +509,7 @@ function Build-InstanceHtml {
 
     # --- custom properties ---
     $customHtml = ''
-    $customPairs = Get-KvPairs (Get-Prop $inst 'CustomProperties')
+    $customPairs = @(Get-KvPairs (Get-Prop $inst 'CustomProperties'))
     if ($customPairs.Count -gt 0) {
         $rows = ''
         foreach ($p in $customPairs) { $rows += "<tr><th>$(Fmt $p.Name)</th><td>$(Fmt $p.Value)</td></tr>`n" }
@@ -518,7 +518,7 @@ function Build-InstanceHtml {
 
     # --- unknown / unmapped parameters ---
     $unknownHtml = ''
-    $unknownPairs = Get-KvPairs (Get-Prop $inst 'UnknownParams')
+    $unknownPairs = @(Get-KvPairs (Get-Prop $inst 'UnknownParams'))
     if ($unknownPairs.Count -gt 0) {
         $rows = ''
         foreach ($p in $unknownPairs) { $rows += "<tr><th>$(Fmt $p.Name)</th><td>$(Fmt $p.Value)</td></tr>`n" }
@@ -527,7 +527,7 @@ function Build-InstanceHtml {
 
     # --- processes ---
     $procHtml = ''
-    $procs = Get-Items (Get-Prop $inst 'Processes')
+    $procs = @(Get-Items (Get-Prop $inst 'Processes'))
     if ($procs.Count -gt 0) {
         $rows = ''
         foreach ($p in $procs) {
@@ -538,7 +538,7 @@ function Build-InstanceHtml {
 
     # --- connections ---
     $connHtml = ''
-    $conns = Get-Items (Get-Prop $inst 'Connections')
+    $conns = @(Get-Items (Get-Prop $inst 'Connections'))
     if ($conns.Count -gt 0) {
         $rows = ''
         foreach ($c in $conns) {
@@ -551,7 +551,7 @@ function Build-InstanceHtml {
 
     # --- related service-install events ---
     $evtHtml = ''
-    $evts = Get-Items (Get-Prop $inst 'ServiceInstallEvents')
+    $evts = @(Get-Items (Get-Prop $inst 'ServiceInstallEvents'))
     if ($evts.Count -gt 0) {
         $rows = ''
         foreach ($e in $evts) {
@@ -562,7 +562,7 @@ function Build-InstanceHtml {
 
     # --- config files captured ---
     $cfgHtml = ''
-    $cfgs = Get-Items (Get-Prop $inst 'ConfigFiles')
+    $cfgs = @(Get-Items (Get-Prop $inst 'ConfigFiles'))
     if ($cfgs.Count -gt 0) {
         $rows = ''
         foreach ($c in $cfgs) {
@@ -767,7 +767,7 @@ if ($ScannerSummary -or $ScannersSkipped) {
                 if ([string]::IsNullOrWhiteSpace($classification)) { $classification = 'FilterOrProxySuspected' }
                 $diagnosticPath = [string](Get-Prop $s 'ResultPath')
                 $pathNote = if ($diagnosticPath) { " Review the diagnostic artifact: $(Fmt $diagnosticPath)." } else { '' }
-                $filterNames = @(Get-Prop $s 'FilterNames')
+                $filterNames = @(Get-Items (Get-Prop $s 'FilterNames'))
                 $namesNote = if ($filterNames.Count -gt 0) { " Named filter evidence: $(Fmt ($filterNames -join ', '))." } else { '' }
                 $scannerWarnings += "<p class='warn-line'>Malwarebytes install failure: possible web-filter/proxy interference was reported ($(Fmt $classification)).$namesNote$pathNote</p>`n"
             }
@@ -780,7 +780,7 @@ if ($ScannerSummary -or $ScannersSkipped) {
                     if ([string]::IsNullOrWhiteSpace($parseNote)) { $parseNote = 'Scan results are not available in a parseable format.' }
                     $findingsDisplay += "<p class='muted'><strong>$(Fmt $scannerName):</strong> $(Fmt $parseNote)</p>`n"
                 } else {
-                    $threats = @(Get-Prop $scannerFindings 'Threats')
+                    $threats = @(Get-Items (Get-Prop $scannerFindings 'Threats'))
                     if ($threats.Count -gt 0) {
                         $findingsDisplay += "<h3>$(Fmt $scannerName) - $(Fmt $threats.Count) threat(s) detected</h3>`n"
                         $scanDate = [string](Get-Prop $scannerFindings 'ScanDate')
@@ -880,7 +880,7 @@ if ($DiffPath -or $diffError) {
         }
         $diffRows = ''
         foreach ($d in (Get-Items (Get-Prop $diffData 'Sections'))) {
-            $diffRows += "<tr><td>$(Fmt (Get-Prop $d 'Section'))</td><td>$(Fmt (Get-Prop $d 'Kind'))</td><td>$(Fmt (Get-Items (Get-Prop $d 'Removed')).Count)</td><td>$(Fmt (Get-Items (Get-Prop $d 'Added')).Count)</td><td>$(Fmt (Get-Items (Get-Prop $d 'Changed')).Count)</td></tr>`n"
+            $diffRows += "<tr><td>$(Fmt (Get-Prop $d 'Section'))</td><td>$(Fmt (Get-Prop $d 'Kind'))</td><td>$(Fmt @(Get-Items (Get-Prop $d 'Removed')).Count)</td><td>$(Fmt @(Get-Items (Get-Prop $d 'Added')).Count)</td><td>$(Fmt @(Get-Items (Get-Prop $d 'Changed')).Count)</td></tr>`n"
         }
         if (-not $diffRows) { $diffRows = '<tr><td colspan="5">No section diff rows were produced.</td></tr>' }
         $diffSectionHtml = @"
@@ -941,7 +941,7 @@ if ($scParseIssues.Count -gt 0) {
         if (-not [string]::IsNullOrWhiteSpace([string]$svcImg)) {
             $extra += "<div class='muted'>Service image path: $(Fmt $svcImg)</div>"
         }
-        $cfgSeen = Get-Items (Get-Prop $p 'ConfigFilesSeen')
+        $cfgSeen = @(Get-Items (Get-Prop $p 'ConfigFilesSeen'))
         if ($cfgSeen.Count -gt 0) {
             $extra += "<div class='muted'>Config files seen: $(FmtList $cfgSeen)</div>"
         }
@@ -949,7 +949,7 @@ if ($scParseIssues.Count -gt 0) {
         if (-not [string]::IsNullOrWhiteSpace([string]$blob)) {
             $extra += "<div class='muted'>Launch-parameter blob: $(Fmt $blob)</div>"
         }
-        $keysSeen = Get-Items (Get-Prop $p 'KeysSeen')
+        $keysSeen = @(Get-Items (Get-Prop $p 'KeysSeen'))
         if ($keysSeen.Count -gt 0) {
             $extra += "<div class='muted'>Keys seen in blob: $(FmtList $keysSeen)</div>"
         }
@@ -1167,7 +1167,7 @@ if ($PowerOptionsRepair) {
     }
     if (-not $actionRows) { $actionRows = '<tr><td colspan="3">No action outcomes were recorded; restoration is unverified.</td></tr>' }
     foreach ($field in @('Notes','ManagementWarnings')) {
-        $items = Get-Items (Get-Prop $repairData $field)
+        $items = @(Get-Items (Get-Prop $repairData $field))
         if ($items.Count -gt 0) {
             $label = if ($field -eq 'Notes') { 'Repair notes' } else { 'Management warnings' }
             $listHtml = ''

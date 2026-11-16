@@ -269,7 +269,7 @@ function Resolve-GuiListToken {
             if (Test-Path -LiteralPath $k -PathType Leaf) { $out += @('-KeptInstances', $k) }
             return $out
         }
-        'SubmitArgs'    { if ($phase -eq 'OFFLINE') { return @('-NoUpload') }; return @() }
+        'SubmitArgs'    { if ($phase -eq 'OFFLINE' -or -not [bool]$Session.Answers['ShareReport']) { return @('-NoUpload') }; return @() }
         # Online share step: the technician unticked "Share the sanitized report" -> build the package, upload nothing.
         'ShareArgs'     { if (-not [bool]$Session.Answers['ShareReport']) { return @('-NoUpload') }; return @() }
         'KeepArgs' {
@@ -775,6 +775,14 @@ function Send-GuiAnswer {
     $Child.LastOutputUtc = (Get-Date).ToUniversalTime()
 }
 
+function Test-GuiScanAction {
+    # Only our collectors/analysis are controllable. Vendor AV and approved
+    # removal/uninstall work keep their existing attended/close-lock behavior.
+    param($Action, [bool]$CloseLock = $false)
+    if (-not $Action -or $CloseLock -or $Action.Kind -ne 'Run' -or $Action.Destructive) { return $false }
+    return ([IO.Path]::GetFileName([string]$Action.ScriptPath) -in @('collect-snapshot.ps1','detect-remote-access.ps1','Invoke-PersistenceScan.ps1','diff-snapshots.ps1'))
+}
+
 function Stop-GuiChild {
     # Ends a running step. By default the whole tree goes (a read-only step's helpers have no reason
     # to outlive it). -KeepDescendants ends only the step's own powershell.exe: closing the window
@@ -1070,7 +1078,7 @@ Export-ModuleMember -Function `
     Expand-GuiTokens, Expand-GuiArgs, Test-GuiCondition, Get-GuiNextAction, Set-GuiAnswer, Complete-GuiAction, `
     Get-GuiFinalStatus, Invoke-GuiBuiltin, Find-GuiFindings, `
     Set-GuiConsoleEncoding, Restore-GuiConsoleEncoding, `
-    Start-GuiChild, Update-GuiChild, Send-GuiAnswer, Stop-GuiChild, `
+    Start-GuiChild, Update-GuiChild, Send-GuiAnswer, Stop-GuiChild, Test-GuiScanAction, `
     Get-GuiPromptTable, Test-GuiPromptMatch, Test-GuiQuestionLike, Get-GuiPendingPrompt, Set-GuiPromptDismissed, Get-GuiShareUrl, Get-GuiShareSkipped, `
     Read-GuiJson, ConvertTo-GuiItems, Get-GuiFindingsView, Get-GuiScannerResult, Get-GuiPersistenceView, Get-GuiDiffView, Get-GuiReportInfo, `
     Save-GuiSession, Get-GuiWindowModes

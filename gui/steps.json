@@ -159,7 +159,7 @@
       ]
     },
     {
-      "Id": "9b", "Title": "Package and share the report", "Group": "Report",
+      "Id": "9b", "Title": "Package and share the report", "TitleNoShare": "Build the report package (keep on this PC)", "Group": "Report",
       "Phases": ["ALL", "OFFLINE"],
       "Calls": [
         { "Script": "Submit-ConnectWiseReport.ps1",

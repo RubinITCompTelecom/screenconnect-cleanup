@@ -188,6 +188,8 @@ try {
     $s = New-GuiSession -Mode Offline -ToolRoot $ToolRoot -RitRoot (Join-Path $work 'share-offline') -Answers @{ ShareReport = $true }
     $sub = @(@((Get-GuiCatalog).Steps | Where-Object { $_.Id -eq '9b' })[0].Calls)[0]
     Check (@(Expand-GuiArgs -Session $s -Template $sub.Args) -contains '-NoUpload') 'the offline half never uploads, whatever the tick box says'
+    $s = New-GuiSession -Mode Full -ToolRoot $ToolRoot -RitRoot (Join-Path $work 'share-full') -Answers @{ ShareReport = $false }
+    Check (@(Expand-GuiArgs -Session $s -Template $sub.Args) -contains '-NoUpload') 'cleanup-first full mode preserves unticked sharing in the report call'
 
     Write-Host 'Answers are validated' -ForegroundColor Cyan
     $s = New-Walk 'Full' -Interactive

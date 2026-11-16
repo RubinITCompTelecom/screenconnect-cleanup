@@ -45,6 +45,12 @@ The left column shows every step and its state (done, skipped and why, failed). 
 bottom shows the scripts' own output live. **Open log** opens the full log; **Open RIT-SCC folder**
 (top right) opens `C:\RIT-SCC`, where every run is kept.
 
+During this tool's snapshots, remote-access detection and persistence inventory, **Stop scan** cancels
+the tool scan and ends the run before later steps. Evidence is kept and the interrupted scan is marked
+cancelled. **Pause after scan** lets the current scan finish, then waits for **Resume** before the next
+step. These controls are unavailable once cleanup is approved. The external antivirus programs keep
+their own controls.
+
 When it finishes you see each ScreenConnect instance as a card. The relay host is the line that
 matters: a host you do not recognise is the scammer's.
 

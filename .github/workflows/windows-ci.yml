@@ -392,6 +392,10 @@ jobs:
         shell: powershell
         run: ./tests/gui/Test-GuiAsk.ps1
 
+      - name: GUI - tool scan pause and stop controls (harmless child fixtures)
+        shell: powershell
+        run: ./tests/gui/Test-GuiScanControls.ps1
+
       - name: GUI - package layout (top launcher in folders with parentheses)
         shell: powershell
         run: ./tests/gui/Test-GuiPackageLayout.ps1

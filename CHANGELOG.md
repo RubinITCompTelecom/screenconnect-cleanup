@@ -9,6 +9,9 @@ Existing releases, their assets/tags and the Latest selection are preserved. Liv
 remains outstanding. The window title and header identify this build as ALPHA.
 - Online cleanup-first preserves the share checkbox when creating its full-run session; unticked sharing
   stays local. Covered alongside Stage then Online, no-prior cancellation, and scanner-only selection.
+- Tool scans now offer Stop scan and Pause after scan / Resume. Stop cancels only the owned tool-scan
+  process tree and prevents later steps; pause waits at the scan boundary without disturbing watchdogs.
+  Approved cleanup and external antivirus processes are excluded. Cancelled output is never a successful scan.
 - The preceding repaired build passed 164 automated matrix commands with two elevation-only skips;
   see `docs/regression-repairs-2026-11-16.md`. Integration-specific results are recorded separately.
 

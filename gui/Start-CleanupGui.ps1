@@ -98,7 +98,8 @@ $controlNames = 'TitleText', 'InfoText', 'RunText', 'BtnOpenRitRoot','StepperHos
 'RbOffline', 'RbOnline', 'RbDetect', 'RbStage', 'SharePanel', 'CbShare', 'BtnStart', 'PriorRunsText',
 'RunPanel', 'StatusTitle', 'StatusDetail', 'Busy', 'Banner', 'BannerText', 'ReviewBar', 'ReviewSummary', 'BtnReviewContinue',
 'CardsHost', 'BtnOpenReport', 'BtnOpenRun', 'BtnRestart', 'BtnNewRun', 'BtnCopy', 'BtnOpenLog', 'ConsoleBox',
-'RowConsole', 'ColStepper', 'LinkRubinIt', 'LinkPupontech', 'RootGrid', 'HeaderCard', 'StatusCard'
+'RowConsole', 'ColStepper', 'LinkRubinIt', 'LinkPupontech', 'RootGrid', 'HeaderCard', 'StatusCard',
+'ScanControls', 'BtnPauseScan', 'BtnStopScan', 'ScanControlHint'
 $missing = @()
 foreach ($n in $controlNames) {
     $c = $win.FindName($n)
@@ -120,6 +121,8 @@ $script:StepRows = @{}
 $script:LogPath = ''
 $script:KeepRows = @()
 $script:CloseLock = $false
+$script:ScanPauseRequested = $false
+$script:ScanWaiting = $false
 $script:DlgValue = $null
 $script:DlgChecks = @{}
 $script:DlgText = $null
@@ -319,6 +322,7 @@ function Update-Stepper {
                 'Done' { $word = 'done'; $bg = 'SuccessBg'; $fg = 'SuccessFg' }
                 'Warn' { $word = 'done with warning'; $bg = 'WarningBg'; $fg = 'WarningFg'; $note = $res.Message }
                 'Failed' { $word = 'failed'; $bg = 'DangerBg'; $fg = 'DangerFg'; $note = $res.Message }
+                'Cancelled' { $word = 'cancelled'; $bg = 'WarningBg'; $fg = 'WarningFg'; $note = $res.Message }
                 'Skipped' { $word = 'skipped'; $bg = ''; $fg = 'Muted'; $note = $res.Message }
                 'Resurrection' { $word = 'RESURRECTION found'; $bg = 'DangerBg'; $fg = 'DangerFg'; $note = $res.Message }
             }
@@ -795,6 +799,7 @@ function Set-PreviewMode {
 function Start-Run {
     param([string]$ModeName)
     $script:Finished = $false
+    $script:ScanPauseRequested = $false; $script:ScanWaiting = $false
     # A second run in the same window must never show the previous run's paste link.
     $script:ShareUrl = ''; $script:ShareSkipped = ''
     # The share tick box (Online only, ticked by default). Test hook: a canned "ShareReport" answer stands in for it.
@@ -860,10 +865,71 @@ function Start-Run {
     Move-Next
 }
 
+function Update-ScanControls {
+    $active = ($script:Child -and -not $script:Child.Finished -and (Test-GuiScanAction -Action $script:Action -CloseLock $script:CloseLock))
+    $ui.ScanControls.Visibility = $(if ($active -or $script:ScanWaiting) { 'Visible' } else { 'Collapsed' })
+    $ui.BtnPauseScan.Content = $(if ($script:ScanWaiting) { 'Resume' } elseif ($script:ScanPauseRequested) { 'Continue automatically' } else { 'Pause after scan' })
+    $ui.ScanControlHint.Text = $(if ($script:ScanWaiting) { 'Paused between steps. Resume to continue, or Stop scan to end the run.' } elseif ($script:ScanPauseRequested) { 'Pause requested. The current scan finishes; the next step waits for Resume.' } else { 'Pause waits for this scan to finish. Stop cancels this tool scan and ends the run.' })
+}
+
+function Invoke-ScanPause {
+    if ($script:InDialog -or $script:CloseLock) { return }
+    if ($script:ScanWaiting) {
+        $script:ScanWaiting = $false; $script:ScanPauseRequested = $false
+        Add-ConsoleNote 'Resumed by the technician.'
+        Update-ScanControls
+        Move-Next
+    } elseif ($script:Child -and (Test-GuiScanAction -Action $script:Action)) {
+        $script:ScanPauseRequested = -not $script:ScanPauseRequested
+        Add-ConsoleNote $(if ($script:ScanPauseRequested) { 'Pause requested after the current tool scan finishes.' } else { 'Pause request cleared; the run will continue automatically.' })
+        Update-ScanControls
+    }
+}
+
+function Continue-AfterScan {
+    param($Action)
+    if ($script:ScanPauseRequested -and -not $script:Session.Stopped -and (Test-GuiScanAction -Action $Action)) {
+        $script:ScanWaiting = $true
+        $ui.Busy.IsIndeterminate = $false
+        $ui.StatusDetail.Text = 'Paused between steps. Click Resume to continue.'
+        Add-ConsoleNote 'Paused after the tool scan. No later step will start until Resume.'
+        Update-ScanControls
+        return
+    }
+    Update-ScanControls
+    Move-Next
+}
+
+function Invoke-ScanStop {
+    if ($script:InDialog -or $script:CloseLock) { return }
+    if (-not $script:ScanWaiting -and (-not $script:Child -or -not (Test-GuiScanAction -Action $script:Action))) { return }
+    $wasWaiting = $script:ScanWaiting
+    $message = $(if ($wasWaiting) { 'End this paused run? The completed scan results are kept. Later steps will not start.' } else { 'The current tool scan will be cancelled and the run will stop. Later removal, scanners and sharing will not start. Existing evidence is kept; interrupted output may be incomplete.' })
+    $r = Show-Dialog -Id 'StopToolScan' -Title 'Stop this tool scan?' -Message $message -Buttons @(
+        @{ Text = 'Stop scan and run'; Value = 'stop' }, @{ Text = 'Keep running'; Value = 'continue' })
+    if (-not $r -or $r.Value -ne 'stop') { return }
+    if ($script:Child) {
+        Stop-GuiChild -Child $script:Child
+        if (-not $script:Child.Process.WaitForExit(5000)) { Add-ConsoleNote 'The scan could not be stopped yet. It is still running; try again.'; return }
+        [void](Complete-GuiAction -Session $script:Session -Action $script:Action -ExitCode 130 -Message 'Cancelled by the technician.')
+        $last = $script:Session.Results[$script:Session.Results.Count - 1]
+        $last.Status = 'Cancelled'; $last.Message = 'Cancelled by the technician; output may be incomplete.'
+    }
+    $script:Session.Stopped = $true
+    $script:Session.StopMessage = $(if ($wasWaiting) { 'Stopped by the technician between steps. Completed scan results are kept; later steps did not run.' } else { 'Stopped by the technician. The tool scan was cancelled; later steps did not run.' })
+    if ($script:Session.PipeRc -eq 0) { $script:Session.PipeRc = 130 }
+    $script:Child = $null; $script:Action = $null
+    $script:ScanPauseRequested = $false; $script:ScanWaiting = $false
+    Add-ConsoleNote $script:Session.StopMessage
+    Update-ScanControls
+    Complete-Run
+}
+
 function Move-Next {
     # Starts the next call, or asks the next question, or finishes. Runs only on the UI thread and
     # only when no child is alive.
     while ($true) {
+        Update-ScanControls
         $a = Get-GuiNextAction -Session $script:Session
         if (-not $a) { Complete-Run; return }
         $script:Action = $a
@@ -899,6 +965,7 @@ function Move-Next {
             continue
         }
         Update-Stepper
+        Update-ScanControls
         return
     }
 }
@@ -909,6 +976,8 @@ function Complete-Run {
     $script:CloseLock = $false
     $script:Finished = $true
     $sess = $script:Session
+    $script:ScanPauseRequested = $false; $script:ScanWaiting = $false
+    Update-ScanControls
     $ui.Busy.IsIndeterminate = $false
     $ui.Busy.Value = 1
     $ui.StatusTitle.Text = $(if ($sess.Stopped) { 'Stopped' } else { 'Finished' })
@@ -1033,7 +1102,7 @@ function Show-RunSummary {
         $s = $res[$sid]
         if (-not $s) { Add-SummaryLine 'Report share' 'not reached' 'WarningFg'; continue }
         if ($s.Status -eq 'Skipped') { Add-SummaryLine 'Report share' ('not shared - ' + $s.Message) 'Muted' }
-        elseif ($sid -eq '9o' -and $s.Status -eq 'Done' -and -not [bool]$Sess.Answers['ShareReport']) { Add-SummaryLine 'Report share' 'not shared - you unticked sharing. The report and connectwise-report.zip are on this PC only.' 'Muted' }
+        elseif ($s.Status -eq 'Done' -and -not [bool]$Sess.Answers['ShareReport']) { Add-SummaryLine 'Report share' 'not shared - you unticked sharing. The report and connectwise-report.zip are on this PC only.' 'Muted' }
         elseif ($s.Status -ne 'Done') { Add-SummaryLine 'Report share' ('failed - ' + $s.Message + ' The local report is kept.') 'DangerFg' }
         elseif ($sid -eq '9o' -and $script:ShareSkipped) { Add-SummaryLine 'Report share' ('NOT shared - ' + $script:ShareSkipped + ' (microbin-url.txt beside the tool is empty). The report and connectwise-report.zip are on this PC only.') 'WarningFg' }
         elseif ($script:ShareUrl) { Add-SummaryLine 'Report shared - paste link' $script:ShareUrl -Selectable }
@@ -1126,7 +1195,7 @@ function Invoke-Tick {
         if ($a.StepId -eq '4' -and $script:Session.FindingsJson) { [void](Show-Findings) }
         Update-Stepper
         Update-HeaderButtons
-        Move-Next
+        Continue-AfterScan -Action $a
         return
     }
     $elapsed = (Get-Date).ToUniversalTime() - $script:Child.StartedUtc
@@ -1136,6 +1205,7 @@ function Invoke-Tick {
     $ui.StatusDetail.Text = $text
     $pp = Get-GuiPendingPrompt -Child $script:Child
     if ($pp) { Resolve-Prompt $pp }
+    Update-ScanControls
 }
 
 # ---- self-test (no window is shown, nothing runs) -------------------------------------------------
@@ -1190,6 +1260,8 @@ if ($SelfTest) {
 }
 
 # ---- wiring --------------------------------------------------------------------------------------
+$ui.BtnPauseScan.add_Click({ Invoke-ScanPause })
+$ui.BtnStopScan.add_Click({ Invoke-ScanStop })
 $channelLabel = $(if ($script:Version -match '(?i)(?:^|[.-])alpha(?:[.-]|$)') { 'ALPHA  ' } else { '' })
 $ui.TitleText.Text = 'ScreenConnect Cleanup  ' + $channelLabel + 'v' + $script:Version
 $win.Title = $ui.TitleText.Text

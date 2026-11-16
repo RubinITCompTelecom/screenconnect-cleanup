@@ -1,5 +1,9 @@
 # ScreenConnect Cleanup
 
+**ALPHA: 1.8.12-gui-alpha.6.** This merged GUI build is for testing; live elevated Windows acceptance
+is still required. Download it from the [separate alpha prerelease](https://github.com/pupontech/screenconnect-cleanup/releases/tag/v1.8.12-gui-alpha.6).
+Existing releases remain available. The installer command below continues to download GitHub's current Latest release.
+
 A Windows technician tool for PCs where a scammer got remote access through ScreenConnect. It usually
 gets there from an **invite email the user clicked** (a fake invoice, meeting or "document shared with
 you"), which installs ScreenConnect connected to the scammer's server.
@@ -33,7 +37,7 @@ Double-click `START-HERE-GUI.bat`, approve the administrator prompt, pick what t
 | Choice | Internet | What it does |
 |---|---|---|
 | **Offline** | not needed | The cleanup: preflight, before snapshot, detection, removal of the ScreenConnect you choose, persistence review, optional power-options repair, after snapshot + diff, local report. Downloads and uploads nothing. |
-| **Online** | needed | Downloads and runs KVRT, ESET Online Scanner and Malwarebytes, checks startup items again after the scans, optional AV uninstall, shares the report if the box is ticked. Continues this PC's last Offline run if there is one. |
+| **Online** | needed | Downloads and runs KVRT, ESET Online Scanner and Malwarebytes, checks startup items again after the scans, optional AV uninstall, shares the report if the box is ticked. Continues this PC's last Offline run if there is one; otherwise offers cleanup first or scanners only. |
 | **Detect only** | not needed | Preflight, snapshot, detection and the report. Changes nothing. Use it to look before you decide. |
 | **Stage tools** | needed | Downloads the scanners into the tool folder for later. Changes nothing on the PC. |
 

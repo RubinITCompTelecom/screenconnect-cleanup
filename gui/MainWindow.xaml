@@ -360,7 +360,7 @@
               <StackPanel>
                 <TextBlock FontSize="14" FontWeight="SemiBold" Text="Online - scanners and sharing (needs internet)"/>
                 <TextBlock Style="{StaticResource Text.Muted}" Margin="0,3,0,0"
-                           Text="Downloads the scanners, runs KVRT, ESET and Malwarebytes, checks persistence again, optional antivirus uninstall, shares the report if the box below is ticked. Continues the offline run for this PC when there is one."/>
+                           Text="Downloads the scanners, runs KVRT, ESET and Malwarebytes, checks persistence again, optional antivirus uninstall, shares the report if the box below is ticked. Continues the offline run for this PC when there is one; when there is none, it offers to run the cleanup first."/>
               </StackPanel>
             </RadioButton>
             <!-- Online only: share the sanitized report to the MicroBin server (microbin-url.txt). Shown when Online is chosen. -->

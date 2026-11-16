@@ -3,7 +3,16 @@
 Semantic versions. The deploy zip is named `screenconnect-cleanup-v<VER>.zip`
 and carries a `VERSION` file so each build is self-identifying.
 
-## [Unreleased] - Code review 2026-11-12 fixes (branch fix/code-review-2026-11-12)
+## [1.8.12-gui-alpha.6] - 2026-11-16 - Reviewed cleanup and GUI integration (ALPHA)
+**ALPHA prerelease.** Combines the reviewed cleanup repairs with the GUI Online cleanup-first fix.
+Existing releases, their assets/tags and the Latest selection are preserved. Live elevated VM acceptance
+remains outstanding. The window title and header identify this build as ALPHA.
+- Online cleanup-first preserves the share checkbox when creating its full-run session; unticked sharing
+  stays local. Covered alongside Stage then Online, no-prior cancellation, and scanner-only selection.
+- The preceding repaired build passed 164 automated matrix commands with two elevation-only skips;
+  see `docs/regression-repairs-2026-11-16.md`. Integration-specific results are recorded separately.
+
+### Included code-review fixes (2026-11-12)
 Fixes for the findings in the 2026-11-12 code review. Not yet run end to end on a VM.
 - **Follow-up regression repairs (2026-11-16):** removal manifests retain the actual user's SID for
   Run values, and the diff preserves registry hive/user identity. A legacy HKCU target without a SID
@@ -58,7 +67,7 @@ Fixes for the findings in the 2026-11-12 code review. Not yet run end to end on 
 - **Docs (#15):** safety-model rule 13 describes the MicroBin paste as it is (HTTPS, plain text, read-only, 1-week
   expiry, readable by anyone with the link); the relay docs are marked unused.
 
-## [Unreleased] - README rewrite, one-liner installer fix, share tick box
+### Included README, installer and share-checkbox changes
 - **Window: "Share the sanitized report" tick box** on the Online choice, ticked by default. Unticked, the
   share step runs with `-NoUpload`: the package is built locally, nothing is uploaded, the run is not marked
   shared and the summary says so. The Offline half still never uploads. Console launchers are unchanged.
@@ -67,6 +76,16 @@ Fixes for the findings in the 2026-11-12 code review. Not yet run end to end on 
   The remote (scammer-side) address stays. `connectwise-report.zip` and `report.html` on the PC keep the full details.
 - Tests: `Test-GuiAsk.ps1` (default, ticked, unticked, Offline), `test_microbin_report_upload.ps1` (anonymous id,
   no local address, remote address kept).
+
+## [1.8.12-gui-beta.2] - 2026-11-15 - Online half runs the cleanup; README rewrite, one-liner installer fix
+**Testing zip** (branch fix/gui-skips-removal). Same as gui-beta.1 plus the changes below.
+- **Fix: the window's Online half skipped the cleanup and went straight to the scanners** on a PC
+  with no finished Offline run (including right after Stage tools, which makes no run). The Online
+  half has no removal step and silently became a scanner-only run. It now asks: **Clean up first,
+  then scan** (the full START-HERE.bat sequence: detection, removal with the typed REMOVE, then the
+  scanners, then the report is shared) or **Scanners only**; closing the question starts nothing.
+  Continuing a finished offline run is unchanged. Tests: three new Online scenarios in
+  `tests/gui/Test-GuiWindow.ps1`.
 - **Fix: the `irm ... | iex` one-liner failed on the GUI releases** ("Bundle missing VERSION"):
   `install-latest.ps1` expected VERSION and START-HERE.bat at the top of the zip, which since
   1.8.12-gui-alpha.3 holds only START-HERE-GUI.bat plus `files\`. It now recognises both layouts and

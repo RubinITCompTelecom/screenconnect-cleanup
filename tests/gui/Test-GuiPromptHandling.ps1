@@ -128,6 +128,15 @@ Write-Host ('COLOUR=' + $a)
     # Dismiss path: "this is not a question" must not pop up again for the same text.
     $child = Start-GuiChild -ScriptPath $unk -ArgumentList @()
     $st = @{ Unknown = 0; Dismissed = $false; Finished = $false }
+    # Observe the first prompt before timing dismissal suppression. Cold child
+    # startup can consume the old five-second window without producing a prompt.
+    $stop = (Get-Date).AddSeconds(30)
+    while ((Get-Date) -lt $stop -and -not $st.Dismissed) {
+        Start-Sleep -Milliseconds 100
+        [void](Update-GuiChild -Child $child)
+        $pp = Get-GuiPendingPrompt -Child $child -QuietSeconds 1
+        if ($pp -and $pp.Kind -eq 'Unknown') { $st.Unknown++; Set-GuiPromptDismissed -Child $child -Text $pp.Text; $st.Dismissed = $true }
+    }
     $stop = (Get-Date).AddSeconds(5)
     while ((Get-Date) -lt $stop) {
         Start-Sleep -Milliseconds 100
@@ -135,7 +144,7 @@ Write-Host ('COLOUR=' + $a)
         $pp = Get-GuiPendingPrompt -Child $child -QuietSeconds 1
         if ($pp -and $pp.Kind -eq 'Unknown') { $st.Unknown++; Set-GuiPromptDismissed -Child $child -Text $pp.Text; $st.Dismissed = $true }
     }
-    Check ($st.Dismissed -and $st.Unknown -eq 1) 'a dismissed generic box does not come back right away for the same unfinished text'
+    Check ($st.Dismissed -and $st.Unknown -eq 1) ('a dismissed generic box does not come back right away for the same unfinished text (observed ' + $st.Unknown + ')')
     # ...but a script blocked on Read-Host must not wait forever: after the repeat interval it comes back.
     $back = $false
     $stop = (Get-Date).AddSeconds(8)

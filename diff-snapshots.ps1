@@ -177,11 +177,14 @@ function Get-CollectionStatus {
 
 # ---- removal-manifest target matching --------------------------------------
 function ConvertTo-RegPathNorm {
-    param([string]$Text)
+    param([string]$Text, [string]$Hive = '', [string]$UserSid = '')
     if ([string]::IsNullOrEmpty($Text)) { return '' }
+    $Text = $Text -replace '(?i)^(Microsoft\.PowerShell\.Core\\)?Registry::', ''
     $s = $Text.ToLowerInvariant().Replace('/', '\').Replace('|', '\').Replace(':', '')
     $s = [regex]::Replace($s, '\\+', '\')
-    $s = [regex]::Replace($s, '^(hklm|hkcu|hku|hkcr|hkey_local_machine|hkey_current_user|hkey_users|hkey_classes_root)\\', '')
+    $s = $s -replace '^hkey_local_machine\\', 'hklm\' -replace '^hkey_current_user\\', 'hkcu\' -replace '^hkey_users\\', 'hku\'
+    if ($s -notmatch '^(hklm|hkcu|hku|hkcr)\\' -and $Hive) { $s = $Hive.ToLowerInvariant() + '\' + $s }
+    if ($s -match '^hkcu\\' -and $UserSid) { $s = 'hku\' + $UserSid.ToLowerInvariant() + '\' + $s.Substring(5) }
     return $s.Trim('\')
 }
 
@@ -197,7 +200,7 @@ function ConvertTo-PathNorm {
 # no targets were produced.
 function Read-ManifestTargets {
     param([string]$Path)
-    $result = [ordered]@{ Targets = @(); Error = $null }
+    $result = [ordered]@{ Targets = @(); Error = $null; IdentityIncomplete = $false }
     try {
         if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
             $result.Error = 'Manifest file not found.'
@@ -243,6 +246,11 @@ function Read-ManifestTargets {
                     $np = ConvertTo-PathNorm $v
                     # Refuse over-broad paths (drive roots, C:\Windows, C:\Program Files...).
                     if (@($np -split '\\' | Where-Object { $_ }).Count -lt 3) { continue }
+                }
+                if ($kind -eq 'runkey' -and (ConvertTo-RegPathNorm $v) -match '^hkcu\\') {
+                    # Old manifests do not identify which user's HKCU was used.
+                    # Never guess a SID from the account running this later diff.
+                    $result.IdentityIncomplete = $true
                 }
                 $targets.Add([pscustomobject]@{ Kind = $kind; Value = $v; Action = $action; Result = $res })
             }
@@ -319,7 +327,7 @@ function Find-TargetsStillPresent {
                 }
             }
             if ($section -eq 'RegistryAutoruns' -and $byKind.ContainsKey('runkey')) {
-                $itemNorm = ConvertTo-RegPathNorm ("$($it.KeyPath)\$($it.ValueName)")
+                $itemNorm = ConvertTo-RegPathNorm ("$($it.KeyPath)\$($it.ValueName)") -Hive ([string]$it.Hive) -UserSid ([string]$it.UserSid)
                 foreach ($t in $byKind['runkey']) {
                     if ($itemNorm -and ($itemNorm -eq (ConvertTo-RegPathNorm $t.Value))) { $hits.Add($t) }
                 }
@@ -411,7 +419,13 @@ function Test-ScalarEqual {
     if ($A -is [bool] -and $B -is [bool]) { return ($A -eq $B) }
     $aNum = ($A -is [int] -or $A -is [long] -or $A -is [double] -or $A -is [decimal] -or $A -is [single])
     $bNum = ($B -is [int] -or $B -is [long] -or $B -is [double] -or $B -is [decimal] -or $B -is [single])
-    if ($aNum -and $bNum) { return ([double]$A -eq [double]$B) }
+    if ($aNum -and $bNum) {
+        $aFloat = ($A -is [double] -or $A -is [single])
+        $bFloat = ($B -is [double] -or $B -is [single])
+        if ($aFloat -and $bFloat) { return ([double]$A -eq [double]$B) }
+        if ($aFloat -or $bFloat) { return $null } # preserve each value's serialized precision
+        return ([decimal]$A -eq [decimal]$B)
+    }
     if ($A -is [string] -or $B -is [string] -or $A -is [bool] -or $B -is [bool] -or $aNum -or $bNum) { return $false }
     return $null
 }
@@ -603,9 +617,12 @@ $manifestUsed = $false
 $manifestError = $null
 $manifestTargetCount = 0
 $targetsStillPresent = @()
+$manifestIdentityIncomplete = $false
 if ($ManifestPath) {
     $mt = Read-ManifestTargets -Path $ManifestPath
     $manifestError = $mt.Error
+    $manifestIdentityIncomplete = $mt.IdentityIncomplete
+    if ($manifestIdentityIncomplete) { $manifestError = 'Legacy HKCU target lacks a user SID; removal identity cannot be verified.' }
     $manifestTargetCount = @($mt.Targets).Count
     if (-not $manifestError -and $manifestTargetCount -eq 0) {
         $manifestError = 'Manifest has no usable removal targets; falling back to snapshot-only comparison.'
@@ -627,7 +644,7 @@ $newSinceBefore = if ($manifestUsed) { $stableAdded.ToArray() } else { @() }
 
 # Precedence: RESURRECTION > INCOMPLETE > CLEAN. Completeness is judged on the
 # stable sections only (informational errors are reported, never decisive).
-$collectionComplete = ($beforeComplete -and $afterComplete)
+$collectionComplete = ($beforeComplete -and $afterComplete -and -not $manifestIdentityIncomplete)
 $verdict = if ($resurrectionCount -gt 0) { 'RESURRECTION' } elseif (-not $collectionComplete) { 'INCOMPLETE' } else { 'CLEAN' }
 $informationalErrors = @($beforeStatus.Informational) + @($afterStatus.Informational)
 $report = [ordered]@{

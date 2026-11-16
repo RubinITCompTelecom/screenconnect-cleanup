@@ -847,6 +847,9 @@ function ConvertTo-RegistryProviderPath {
         @{ Prefix = 'HKEY_CURRENT_USER\'; Provider = 'HKCU:\' },
         @{ Prefix = 'HKLM\'; Provider = 'HKLM:\' },
         @{ Prefix = 'HKCU\'; Provider = 'HKCU:\' }
+        @{ Prefix = 'HKEY_USERS\'; Provider = 'Registry::HKEY_USERS\' },
+        @{ Prefix = 'HKU\'; Provider = 'Registry::HKEY_USERS\' },
+        @{ Prefix = 'HKU:\'; Provider = 'Registry::HKEY_USERS\' }
     )
     foreach ($item in $win32Prefixes) {
         if ($p.StartsWith($item.Prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -860,6 +863,9 @@ function Test-AllowedUninstallRegistryPath {
     param([string]$RegistryKeyPath)
     $normalized = ConvertTo-RegistryProviderPath -RegistryKeyPath $RegistryKeyPath
     if ([string]::IsNullOrWhiteSpace($normalized)) { return $false }
+    if ($normalized -match '^Registry::HKEY_USERS\\(S-1-(?:5-21|12-1)-[0-9]+-[0-9]+-[0-9]+-[0-9]+)\\SOFTWARE\\(?:WOW6432Node\\)?Microsoft\\Windows\\CurrentVersion\\Uninstall\\[^\\]+$') {
+        return [bool](Test-Path -LiteralPath ('Registry::HKEY_USERS\' + $Matches[1]))
+    }
     $roots = @(
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
         'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
@@ -888,7 +894,7 @@ function Get-VerifiedUninstallEntry {
     $resolvedKeyPath = ConvertTo-RegistryProviderPath -RegistryKeyPath $RegistryKeyPath
     if (-not (Test-AllowedUninstallRegistryPath -RegistryKeyPath $resolvedKeyPath)) {
         Write-Log "  Plan UninstallRegistryKey rejected: path is outside approved uninstall roots" 'Warn'
-        Add-ManifestEntry -InstanceId $InstanceId -Action 'ValidateUninstallKey' -Target $RegistryKeyPath -Result 'Rejected' -Details 'Registry key is outside approved HKLM/HKCU uninstall roots'
+        Add-ManifestEntry -InstanceId $InstanceId -Action 'ValidateUninstallKey' -Target $RegistryKeyPath -Result 'Rejected' -Details 'Registry key is outside approved machine/current-user/loaded-user uninstall roots'
         return $null
     }
 
@@ -1157,6 +1163,11 @@ function Get-UninstallEntriesForInstance {
         'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
     )
     $matches = New-Object System.Collections.ArrayList
+    foreach ($hive in @(Get-ChildItem -LiteralPath 'Registry::HKEY_USERS' -ErrorAction SilentlyContinue)) {
+        if ($hive.PSChildName -match '^S-1-(?:5-21|12-1)-[0-9]+-[0-9]+-[0-9]+-[0-9]+$') {
+            $roots += 'Registry::HKEY_USERS\' + $hive.PSChildName + '\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+        }
+    }
     foreach ($r in $roots) {
         if (-not (Test-Path -LiteralPath $r)) { continue }
         try {
@@ -1848,7 +1859,12 @@ function Clean-Persistence {
                     if ($Execute) {
                         $regKey.DeleteValue($valueName, $true)
                         Write-Log "    Deleted Run key value: $shownName"
-                        Add-ManifestEntry -InstanceId $InstanceId -Action 'DeleteRunKey' -Target "$rk\$shownName" -Result 'Success' -Details "Referenced $InstallDir"
+                        $manifestKey = $rk
+                        if ($rk -match '^HKCU:') {
+                            $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+                            $manifestKey = $rk -replace '^HKCU:', ('HKEY_USERS\' + $sid)
+                        }
+                        Add-ManifestEntry -InstanceId $InstanceId -Action 'DeleteRunKey' -Target "$manifestKey\$shownName" -Result 'Success' -Details "Referenced $InstallDir"
                         $cleaned++
                     } else {
                         Write-Log "    [DRY-RUN] Would delete Run key value: $shownName"
@@ -2171,8 +2187,10 @@ foreach ($inst in $scInstancesArray) {
                 $orphanPath = [string](Get-EntryPropertySafe -Instance $uninstallEntry -PropertyName 'PSPath')
                 if ($orphanPath) {
                     $regPath = $orphanPath -replace '^Microsoft\.PowerShell\.Core\\Registry::', ''
+                    $regPath = $regPath -replace '^Registry::', ''
                     $regPath = $regPath -replace '^HKEY_LOCAL_MACHINE', 'HKLM'
                     $regPath = $regPath -replace '^HKEY_CURRENT_USER', 'HKCU'
+                    $regPath = $regPath -replace '^HKEY_USERS', 'HKU'
                     $safeInstanceFileStem = Get-SafeInstanceFileStem -InstanceId $instanceId
                     $backup = Join-Path $WorkDir ('uninstall-key-' + $safeInstanceFileStem + '.reg')
                     if (-not (Test-PathContained -Root $WorkDir -Candidate $backup)) {

@@ -247,6 +247,19 @@ checks['volatile added not counted as resurrection'] = pr['Kind']=='volatile' an
 checks['nested array field changed structurally'] = any(c.get('Key') == 'SynthArray' and c.get('Fields') == ['Tags'] for c in svc['Changed'])
 checks['empty object counts as zero'] = am['BeforeCount'] == 0 and am['AfterCount'] == 0 and not am['Added'] and not am['Removed']
 checks['forensic history is informational'] = pf['Kind'] == 'informational' and pf['Added'] == ['synth-history.pf'] and d['ResurrectionsAdded'] == 1
+# Regression: use the collector's real per-user identity across the manifest boundary.
+user_sid = 'S-1-5-21-100-200-300-1001'
+user_path = 'HKEY_USERS\\' + user_sid + '\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run'
+bu, au = base_pair()
+au['Sections']['RegistryAutoruns'].append(dict(Key='victim|Agent', Hive='HKCU', UserSid=user_sid,
+    KeyPath='Registry::' + user_path, ValueName='Agent', Value='C:\\agent.exe'))
+_, du = run_diff(bu, au, 'user-runkey', manifest_of(entry('DeleteRunKey', user_path + '\\Agent')))
+checks['user Run entry is RESURRECTION'] = du['Verdict'] == 'RESURRECTION'
+au['Sections']['RegistryAutoruns'][-1]['KeyPath'] = ('Registry::' + user_path).replace(user_sid, user_sid[:-1] + '2')
+_, du_other = run_diff(bu, au, 'other-user-runkey', manifest_of(entry('DeleteRunKey', user_path + '\\Agent')))
+checks['different user does not resurrect the victim target'] = du_other['Verdict'] == 'CLEAN'
+_, du_legacy = run_diff(bu, bu, 'legacy-user-runkey', manifest_of(entry('DeleteRunKey', 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\\Agent')))
+checks['ambiguous legacy HKCU identity is INCOMPLETE'] = du_legacy['Verdict'] == 'INCOMPLETE'
 ok = all(checks.values())
 for k,v in checks.items(): print(('PASS' if v else 'FAIL'), k)
 sys.exit(0 if ok else 1)

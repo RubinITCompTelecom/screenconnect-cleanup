@@ -45,7 +45,7 @@ try {
     $marker = Join-Path $probe 'uploader-called.txt'
     $stub = "param([string]`$FindingsJson,[string]`$WorkDir,[string]`$MicroBinUrl,[string]`$MicroBinUploaderPasswordFile)`r`n[IO.File]::WriteAllText('" + $marker.Replace("'", "''") + "', [string]`$FindingsJson)`r`nexit 0`r`n"
     [IO.File]::WriteAllText((Join-Path $toolDir 'Submit-ConnectWiseReport.ps1'), $stub)
-    $psHost = Join-Path $PSHOME 'powershell.exe'
+    $psHost = (Get-Process -Id $PID).Path
 
     function Invoke-Detect {
         param([string[]]$Extra)

@@ -131,6 +131,8 @@ try {
     Check "value named '[S]creenConnect' is deleted" ($namesAfter -notcontains '[S]creenConnect') ($namesAfter -join ', ')
     Check "'*' did not wipe the other values" (($namesAfter -contains 'Keep-Notepad') -and ($namesAfter -contains 'Keep-Other') -and $namesAfter.Count -eq 2) ($namesAfter -join ', ')
     Check 'two DeleteRunKey Success entries, no failures' ((@($script:Manifest | Where-Object { $_.Action -eq 'DeleteRunKey' -and $_.Result -eq 'Success' }).Count -eq 2) -and (@($script:Manifest | Where-Object { $_.Result -eq 'Failed' }).Count -eq 0)) ''
+    $currentSid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    Check 'HKCU manifest targets carry the exact user SID' (@($script:Manifest | Where-Object { $_.Action -eq 'DeleteRunKey' -and $_.Target -notlike ('HKEY_USERS\'+$currentSid+'\*') }).Count -eq 0) ''
 
     $script:Manifest.Clear()
     $ok = Clean-Persistence -InstallDir $missingDir -InstanceId 'abc123' -RunKeys @('HKCU:\Software\RIT-SCC-Test-absent-' + [guid]::NewGuid().ToString('N'))

@@ -281,20 +281,20 @@ function Get-UserProfileRoots {
                 $folder = [System.Environment]::ExpandEnvironmentVariables($img)
                 if (-not $folder) { continue }
                 $root = $HiveRootPrefix + '\' + $sid
-            $profilePaths = @{ AppData = (Join-Path $folder 'AppData\Roaming'); LocalAppData = (Join-Path $folder 'AppData\Local') }
-            $shellKey = $null
-            try {
-                $shellKey = Get-Item -LiteralPath ($root + '\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders') -ErrorAction Stop
-                foreach ($pair in @(@('AppData','AppData'), @('LocalAppData','Local AppData'))) {
-                    # The provider expands REG_EXPAND_SZ with the admin's environment;
-                    # read the raw value and expand USERPROFILE for this victim instead.
-                    $rawPath = [string]$shellKey.GetValue($pair[1], $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
-                    if ($rawPath) {
-                        $rawPath = $rawPath -ireplace '%USERPROFILE%', ($folder -replace '\$', '$$$$')
-                        $profilePaths[$pair[0]] = [Environment]::ExpandEnvironmentVariables($rawPath)
+                $profilePaths = @{ AppData = (Join-Path $folder 'AppData\Roaming'); LocalAppData = (Join-Path $folder 'AppData\Local') }
+                $shellKey = $null
+                try {
+                    $shellKey = Get-Item -LiteralPath ($root + '\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders') -ErrorAction Stop
+                    foreach ($pair in @(@('AppData','AppData'), @('LocalAppData','Local AppData'))) {
+                        # The provider expands REG_EXPAND_SZ with the admin's environment;
+                        # read the raw value and expand USERPROFILE for this victim instead.
+                        $rawPath = [string]$shellKey.GetValue($pair[1], $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+                        if ($rawPath) {
+                            $rawPath = $rawPath -ireplace '%USERPROFILE%', ($folder -replace '\$', '$$$$')
+                            $profilePaths[$pair[0]] = [Environment]::ExpandEnvironmentVariables($rawPath)
+                        }
                     }
-                }
-            } catch { } finally { if ($null -ne $shellKey) { $shellKey.Close() } }
+                } catch { } finally { if ($null -ne $shellKey) { $shellKey.Close() } }
                 [void]$profiles.Add([PSCustomObject]@{
                     Sid         = $sid
                     Name        = (Split-Path -Path $folder -Leaf)

@@ -124,7 +124,14 @@ function Protect-SccBaseFolder {
     #>
     param([Parameter(Mandatory = $true)][string]$Path)
     $di = New-Object System.IO.DirectoryInfo($Path)
-    $di.SetAccessControl((New-SccRunRootSecurity))
+    if ($PSVersionTable.PSEdition -eq 'Desktop') { $di.SetAccessControl((New-SccRunRootSecurity)) }
+    else { [IO.FileSystemAclExtensions]::SetAccessControl($di, (New-SccRunRootSecurity)) }
+}
+function New-SccSecuredDirectory {
+    param([string]$Path)
+    $security = New-SccRunRootSecurity
+    if ($PSVersionTable.PSEdition -eq 'Desktop') { [IO.Directory]::CreateDirectory($Path, $security) }
+    else { [IO.FileSystemAclExtensions]::CreateDirectory($security, $Path) }
 }
 function New-SccProtectedRunRoot {
     <#
@@ -140,7 +147,7 @@ function New-SccProtectedRunRoot {
         Protect-SccBaseFolder -Path $Root
     } else {
         # Created with its security descriptor in one call: never exists with the inherited ACL.
-        $null = [IO.Directory]::CreateDirectory($Root, (New-SccRunRootSecurity))
+        $null = New-SccSecuredDirectory -Path $Root
         if (Test-SccIsReparsePoint $Root) { throw ($Root + ' is a junction or symlink; refusing to create a run folder under it.') }
     }
     $baseReason = ''
@@ -149,7 +156,7 @@ function New-SccProtectedRunRoot {
     }
     $path = Join-Path $Root ($env:COMPUTERNAME + '-' + [guid]::NewGuid().ToString('N'))
     if (Test-Path -LiteralPath $path) { throw ('Run folder already exists: ' + $path) }
-    $null = [IO.Directory]::CreateDirectory($path, (New-SccRunRootSecurity))
+    $null = New-SccSecuredDirectory -Path $path
     $reason = ''
     if (-not (Test-SccRunRootTrusted -RunRoot $path -Reason ([ref]$reason))) {
         throw ('New run folder did not verify as locked: ' + $reason)

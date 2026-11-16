@@ -109,6 +109,16 @@ try {
     $vu = @($un2 | Where-Object { $_.KeyName -eq 'VictimApp' })
     Check 'Detector: per-user uninstall entry of the victim is read with its SID' ($vu.Count -eq 1 -and $vu[0].UserSid -eq $sidA -and $vu[0].UserName -eq 'victim' -and $vu[0].RegistryKey)
     Check 'Detector: machine-wide uninstall rows keep UserSid null' (@($un2 | Where-Object { $_.RegistryKey -like 'HKEY_LOCAL_MACHINE*' -and $null -ne $_.UserSid }).Count -eq 0)
+    # A loaded victim can have folder redirection independent of the admin's environment.
+    $shell = "$hives\$sidA\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+    New-Item -Path $shell -Force | Out-Null
+    New-ItemProperty -LiteralPath $shell -Name AppData -Value '%USERPROFILE%\RedirectedRoaming' -PropertyType ExpandString | Out-Null
+    New-ItemProperty -LiteralPath $shell -Name 'Local AppData' -Value (Join-Path $tmp 'redirected-local') -PropertyType String | Out-Null
+    $redirected = @(Get-UserProfileRoots -ProfileListPath $profileList -HiveRootPrefix $hives) | Where-Object Sid -eq $sidA
+    Check 'Detector: redirected roaming path expands the victim profile' ($redirected.AppData -eq (Join-Path $dirA 'RedirectedRoaming'))
+    . ([scriptblock]::Create((Get-FunctionText $snap @('Get-UserProfileRoots'))))
+    $redirected = @(Get-UserProfileRoots -ProfileListPath $profileList -HiveRootPrefix $hives) | Where-Object Sid -eq $sidA
+    Check 'Snapshot: redirected local AppData is preserved' ($redirected.LocalAppData -eq (Join-Path $tmp 'redirected-local'))
 } finally {
     Remove-Item -LiteralPath $fix -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue

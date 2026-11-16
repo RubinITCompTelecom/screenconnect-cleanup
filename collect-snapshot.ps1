@@ -170,14 +170,28 @@ function Get-UserProfileRoots {
             if (-not $img) { continue }
             $folder = [System.Environment]::ExpandEnvironmentVariables($img)
             $root = $HiveRootPrefix + '\' + $sid
+            $profilePaths = @{ AppData = (Join-Path $folder 'AppData\Roaming'); LocalAppData = (Join-Path $folder 'AppData\Local') }
+            $shellKey = $null
+            try {
+                $shellKey = Get-Item -LiteralPath ($root + '\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders') -ErrorAction Stop
+                foreach ($pair in @(@('AppData','AppData'), @('LocalAppData','Local AppData'))) {
+                    # The provider expands REG_EXPAND_SZ with the admin's environment;
+                    # read the raw value and expand USERPROFILE for this victim instead.
+                    $rawPath = [string]$shellKey.GetValue($pair[1], $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+                    if ($rawPath) {
+                        $rawPath = $rawPath -ireplace '%USERPROFILE%', ($folder -replace '\$', '$$$$')
+                        $profilePaths[$pair[0]] = [Environment]::ExpandEnvironmentVariables($rawPath)
+                    }
+                }
+            } catch { } finally { if ($null -ne $shellKey) { $shellKey.Close() } }
             $profiles.Add([PSCustomObject]@{
                 Sid          = $sid
                 Name         = (Split-Path -Path $folder -Leaf)
                 ProfilePath  = $folder
                 HiveRoot     = $root
                 Loaded       = [bool](Test-Path -LiteralPath $root)
-                AppData      = (Join-Path $folder 'AppData\Roaming')
-                LocalAppData = (Join-Path $folder 'AppData\Local')
+                AppData      = $profilePaths.AppData
+                LocalAppData = $profilePaths.LocalAppData
             })
         }
     }
@@ -202,6 +216,12 @@ function Get-CachedUserProfiles {
     }
     $curSid = $null
     try { $curSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch { }
+    foreach ($p in $list) {
+        if ($p.Sid -eq $curSid) {
+            if ($env:APPDATA) { $p.AppData = $env:APPDATA }
+            if ($env:LOCALAPPDATA) { $p.LocalAppData = $env:LOCALAPPDATA }
+        }
+    }
     if ($curSid -and -not @($list | Where-Object { $_.Loaded -and $_.Sid -eq $curSid })) {
         $list.Add([PSCustomObject]@{
             Sid = $curSid; Name = [string]$env:USERNAME; ProfilePath = [string]$env:USERPROFILE

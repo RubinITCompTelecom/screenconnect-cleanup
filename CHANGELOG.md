@@ -5,6 +5,20 @@ and carries a `VERSION` file so each build is self-identifying.
 
 ## [Unreleased] - Code review 2026-11-12 fixes (branch fix/code-review-2026-11-12)
 Fixes for the findings in the 2026-11-12 code review. Not yet run end to end on a VM.
+- **Follow-up regression repairs (2026-11-16):** removal manifests retain the actual user's SID for
+  Run values, and the diff preserves registry hive/user identity. A legacy HKCU target without a SID
+  yields INCOMPLETE rather than an unverifiable CLEAN. Loaded-user uninstall keys emitted by the
+  detector now pass the remover's constrained uninstall-root validation and fallback search.
+  Profile collection honors redirected AppData in loaded users' raw User Shell Folders values and
+  the current account's environment. Integer/decimal comparisons preserve exact numeric precision.
+- **Guided scanner reports:** both batch and GUI pass all three scanner outcomes through
+  `Write-ScannerSummary.ps1`; skipped, unstaged and failed launches remain distinct. Reports retain
+  raw scanner identity and process exit-code fields. An unfamiliar quiet prompt again offers the
+  generic answer dialog, while recognized snapshot progress does not.
+- **Regression coverage:** the twelve previously omitted review tests and the new repair tests run
+  in both CI PowerShell editions. Protected directory creation uses the corresponding atomic ACL
+  API on each edition. Console-visibility fixtures establish a visible starting window, and the
+  watchdog's successful-worker fixture allows startup time without extending stall/failure budgets.
 - **Power-options repair can start again (#1).** START-HERE.bat, sc-cleanup.ps1 and steps.json passed
   `-Confirm:$false` through `powershell -File`, which arrives as a string and failed binding (exit 1). Removed;
   a test now launches the repair with the exact argument lists from the bat and steps.json.

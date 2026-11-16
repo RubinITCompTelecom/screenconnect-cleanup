@@ -302,10 +302,10 @@ function Resolve-GuiListToken {
                 $r = @($Session.Results | Where-Object { $_.StepId -eq $pair[0] } | Select-Object -Last 1)
                 $state = 'NotRun'
                 if ($r.Count) {
-                    if ($r[0].Status -eq 'Skipped') {
-                        $state = 'Skipped'
-                        if ($r[0].Message -match 'not staged') { $state = 'NotStaged' }
-                    } else { $state = 'Exit:' + [int]$r[0].ExitCode }
+                    if ($r[0].Message -match 'not staged') { $state = 'NotStaged' }
+                    elseif ($r[0].Status -eq 'Skipped') { $state = 'Skipped' }
+                    elseif ($null -eq $r[0].ExitCode) { $state = 'Exit:3' }
+                    else { $state = 'Exit:' + [int]$r[0].ExitCode }
                 }
                 $out += @($pair[1], $state)
             }

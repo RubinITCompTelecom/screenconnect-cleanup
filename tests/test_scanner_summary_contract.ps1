@@ -13,6 +13,11 @@ try {
     @{ComputerName='FIXTURE';ScreenConnect=@{Instances=@();ParseIssues=@()};OtherTargets=@()}|ConvertTo-Json -Depth 6|Set-Content $findings
     & (Join-Path $repo 'New-InvestigationReport.ps1') -FindingsJson $findings -ScannerSummary (Join-Path $root 'scanner_results.json') -OutputPath $html *> $null
     if(-not ([IO.File]::ReadAllText($html).Contains('<td>KVRT</td><td>KVRT.exe</td><td>Completed</td><td>0</td>'))){throw 'Report dropped the completed scanner identity or exit code'}
+    # Older guided runs passed the raw wrapper object directly to the report.
+    $legacy=Join-Path $root 'legacy-scanner-result.json'
+    @{Tool='Malwarebytes.Malwarebytes (winget install)';Status='InstallFailed';ProcessExitCode=6}|ConvertTo-Json|Set-Content $legacy
+    & (Join-Path $repo 'New-InvestigationReport.ps1') -FindingsJson $findings -ScannerSummary $legacy -OutputPath $html *> $null
+    if(-not ([IO.File]::ReadAllText($html).Contains('<td>Malwarebytes.Malwarebytes (winget install)</td><td>Malwarebytes.Malwarebytes (winget install)</td><td>InstallFailed</td><td>6</td>'))){throw 'Legacy raw result lost its scanner identity or process exit code'}
     # A stale success from an earlier attempt cannot override a refused retry.
     & (Join-Path $repo 'Write-ScannerSummary.ps1') -WorkDir $root -KvrtState 'Exit:3'
     $rows=Get-Content (Join-Path $root 'scanner_results.json') -Raw|ConvertFrom-Json

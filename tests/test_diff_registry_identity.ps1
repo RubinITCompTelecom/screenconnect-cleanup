@@ -16,7 +16,12 @@ $row.Hive='HKLM';$row.KeyPath='SOFTWARE\Microsoft\Windows\CurrentVersion\Run';$r
 $target.Value='HKLM:'+ $suffix
 if (@(Find-TargetsStillPresent @($target) @{RegistryAutoruns=@($row)}).Count -ne 1) {throw 'Legacy machine autorun shape no longer matches'}
 if (Test-ScalarEqual ([long]9007199254740992) ([long]9007199254740993)) {throw 'Adjacent Int64 values lost precision'}
-if (Test-ScalarEqual ([decimal]'1.000000000000000000000000001') ([decimal]'1.000000000000000000000000002')) {throw 'Decimal precision was lost'}
+# Core's string-to-decimal language cast can round through floating point.
+# Parse exact decimals so the fixture reaches the comparison with distinct values.
+$decimalA=[decimal]::Parse('1.000000000000000000000000001',[Globalization.CultureInfo]::InvariantCulture)
+$decimalB=[decimal]::Parse('1.000000000000000000000000002',[Globalization.CultureInfo]::InvariantCulture)
+if ([decimal]::Equals($decimalA,$decimalB)) {throw 'Decimal fixture values must be distinct'}
+if (Test-ScalarEqual $decimalA $decimalB) {throw 'Decimal precision was lost'}
 if (-not (Test-ScalarEqual ([long]42) ([decimal]42))) {throw 'Equal exact numbers should compare equal'}
 if (Test-ScalarEqual ([long]9007199254740993) ([double]9007199254740992)) {throw 'Mixed float/integer comparison lost precision'}
 Write-Host 'PASS: per-user registry identities stay distinct; machine aliases work; numeric changes retain precision.'

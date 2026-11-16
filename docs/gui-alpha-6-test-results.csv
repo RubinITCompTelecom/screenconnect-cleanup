@@ -1,0 +1,12 @@
+Edition,Name,Status,Seconds
+PS51,tests\ci\Test-Parse.ps1,PASS,1
+PS7,tests\ci\Test-Parse.ps1,PASS,1
+PS7,tests\ci\Test-HouseRules.ps1,PASS,2
+PS51,tests\gui\Test-GuiAsk.ps1,PASS,3
+PS51,tests\gui\Test-GuiScanControls.ps1,PASS,5
+PS51,tests\gui\Test-GuiLauncher.ps1,PASS,26
+PS51,tests\gui\Test-GuiPackageLayout.ps1,PASS,18
+PS51,tests\gui\Test-GuiPromptContract.ps1,PASS,1
+PS51,tests\gui\Test-GuiScannerSummary.ps1,PASS,1
+PS51,tests\gui\Test-GuiUnknownPrompt.ps1,PASS,1
+PS51,tests\gui\Test-GuiWindow.ps1,PASS,203

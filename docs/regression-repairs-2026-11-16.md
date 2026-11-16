@@ -1,5 +1,8 @@
 # Regression repairs and validation - 2026-11-16
 
+Historical repaired-source validation. See [GUI alpha.6 integration](gui-alpha-6-validation.md)
+for the later merge and requested scan controls.
+
 Branch: `fix/code-review-2026-11-12`. Runtime repairs through `d7845e3`;
 final test/CI adjustments through `7c5ef73`.
 This follow-up repairs the seven findings against `d2921f3`; the earlier

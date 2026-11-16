@@ -45,6 +45,29 @@ try {
     $dryRun = & $psHost -NoLogo -NoProfile -ExecutionPolicy Bypass -File $repairScript -Apply -WhatIf -WorkDir $probeRoot -ResultPath (Join-Path $probeRoot 'whatif.json') 2>&1
     $dryRunCode = $LASTEXITCODE
     Check 'WhatIf exits before Windows/system prerequisites and writes nothing' ($dryRunCode -eq 0 -and -not (Test-Path (Join-Path $probeRoot 'whatif.json'))) (($dryRun -join "`n"))
+
+    # Review 2026-11-12 #1: the real launch argument lists must bind under 'powershell -File'.
+    # A '-Confirm:$false' token arrives as a string there and fails SwitchParameter binding (exit 1).
+    # -WhatIf is appended so the probe stops before touching Windows settings.
+    $batLine = @([System.IO.File]::ReadAllLines((Join-Path $repoRoot 'START-HERE.bat')) | Where-Object { $_ -match 'Repair-PowerOptions\.ps1"' })[0]
+    Check 'START-HERE.bat repair line found' ([bool]$batLine)
+    $batArgs = @()
+    foreach ($m in [regex]::Matches(($batLine -replace '^.*Repair-PowerOptions\.ps1"', ''), '"[^"]*"|\S+')) {
+        $t = $m.Value.Trim('"')
+        if ($t -match '^!RESET_GPO_ARGS!$') { continue }
+        $t = $t -replace '!SCC_RUN_ROOT!', $probeRoot
+        $batArgs += $t
+    }
+    $batOut = & $psHost -NoLogo -NoProfile -ExecutionPolicy Bypass -File $repairScript @batArgs -WhatIf 2>&1
+    Check 'START-HERE.bat repair argument list binds in a real child process' ($LASTEXITCODE -eq 0) (($batOut -join "`n"))
+
+    $raw = [System.IO.File]::ReadAllText((Join-Path $repoRoot 'gui\steps.json'))
+    $mm = [regex]::Match($raw, '"Args":\s*(\["-Apply"[^\]]*\])')
+    $jsonArgs = if ($mm.Success) { @($mm.Groups[1].Value | ConvertFrom-Json) } else { $null }
+    Check 'steps.json repair step found' ([bool]$jsonArgs)
+    $jsonArgs = @($jsonArgs | Where-Object { $_ -notlike '{@*}' } | ForEach-Object { $_ -replace '\{RunRoot\}', $probeRoot })
+    $jsonOut = & $psHost -NoLogo -NoProfile -ExecutionPolicy Bypass -File $repairScript @jsonArgs -WhatIf 2>&1
+    Check 'steps.json repair argument list binds in a real child process' ($LASTEXITCODE -eq 0) (($jsonOut -join "`n"))
 } finally {
     Remove-Item -LiteralPath $probeRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

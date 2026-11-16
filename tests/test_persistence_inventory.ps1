@@ -37,6 +37,16 @@ try {
         if(@($reg.Findings|Where-Object Kind -eq 'RunKey').Count -lt 1){throw 'registry fixture did not produce a candidate'}
         if(@($reg.Items|Where-Object {$_.ValueKind -eq 'Unknown'}).Count){throw 'registry value kind is unknown'}
         if(@($reg.Items|Where-Object {$_.RegistryPath -like 'Registry::HKEY_USERS\*'}).Count -lt 1){throw 'loaded user hive registry values absent'}
+        # Review #20: only UserInitMprLogonScript in Environment is an autorun.
+        $envReg=Get-SccRegistryEvidence -ValueReader { param($path,$profile) if($path -like '*\Environment'){
+            [pscustomobject]@{Name='TEMP';Kind='ExpandString';Value='%USERPROFILE%\AppData\Local\Temp'}
+            [pscustomobject]@{Name='Path';Kind='ExpandString';Value='%USERPROFILE%\AppData\Local\Microsoft\WindowsApps;'}
+            [pscustomobject]@{Name='UserInitMprLogonScript';Kind='String';Value='wscript.exe C:\Users\Public\logon.vbs'} } }
+        $envFindings=@($envReg.Findings|Where-Object {$_.Target -like '*\Environment|*'})
+        if(@($envFindings|Where-Object {$_.Target -match '\|(TEMP|Path)$'}).Count){throw 'Environment TEMP/Path produced a false RunKey finding'}
+        if(@($envFindings|Where-Object {$_.Target -like '*|UserInitMprLogonScript'}).Count -lt 1){throw 'UserInitMprLogonScript logon script was not flagged'}
+        if(@($envReg.Items|Where-Object {$_.HivePath -like '*\Environment' -and $_.ValueName -ne 'UserInitMprLogonScript'}).Count){throw 'non-autorun Environment values were inventoried as autoruns'}
+        if(-not (Test-SccAutorunValue 'Registry::HKEY_USERS\S-1\Software\Microsoft\Windows\CurrentVersion\Run' 'TEMP')){throw 'Run key values must still be tested'}
 
         $startupDir=Join-Path $script:FixtureDir 'profile\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup'
         $null=New-Item -ItemType Directory -Force -Path $startupDir
@@ -57,6 +67,57 @@ try {
             [pscustomobject]@{Time=[datetime]::SpecifyKind([datetime]'2020-01-01 01:00:00',[DateTimeKind]::Utc);Reference=[version]'1.2';Values=@('a','b')}
         }
         if($projection.Items[0].Reference -isnot [string] -or $projection.Items[0].Reference -ne '1.2' -or $projection.Items[0].Time -ne '2020-01-01T01:00:00.0000000Z'){throw 'generic evidence retained a native object graph or non-ISO timestamp'}
+        # Review #6: a live hosts line must serialize as a plain string. Get-Content
+        # strings carry PSProvider note properties that explode at -Depth 12.
+        $hostsFixture=Join-Path $script:FixtureDir 'hosts'
+        [IO.File]::WriteAllLines($hostsFixture,[string[]]@('# comment','','127.0.0.1 example.invalid','  # indented comment'))
+        $hostsLines=@(Get-SccHostsLines -Path $hostsFixture)
+        if($hostsLines.Count -ne 1 -or $hostsLines[0] -ne '127.0.0.1 example.invalid'){throw 'hosts reader did not keep exactly the live line'}
+        if($hostsLines[0].PSObject.Properties['PSProvider']){throw 'hosts reader returned a provider-decorated string'}
+        $hostsEvidence=Get-SccGenericEvidence -Name 'Hosts' -Collector {Get-SccHostsLines -Path $hostsFixture}
+        $hostsJson=ConvertTo-Json -InputObject ([pscustomobject]@{Items=$hostsEvidence.Items}) -Depth 12 -Compress
+        if($hostsEvidence.Errors.Count -or $hostsJson.Length -gt 200){throw ('hosts evidence serialized too large: '+$hostsJson.Length+' chars')}
+        # The generic wrapper must also flatten decorated strings from any collector.
+        $decorated=Get-SccGenericEvidence -Name 'Decorated' -Collector {Get-Content -LiteralPath $hostsFixture | Where-Object {$_ -and $_ -notmatch '^\s*#'}}
+        $decoratedJson=ConvertTo-Json -InputObject ([pscustomobject]@{Items=$decorated.Items}) -Depth 12 -Compress
+        if($decorated.Items.Count -ne 1 -or $decoratedJson.Length -gt 200){throw ('Get-Content string was not flattened: '+$decoratedJson.Length+' chars')}
+        # Optimization: user-writable roots are swept before Program Files.
+        $sweep=@(Get-SccScriptSweepRoots)
+        if($env:SystemDrive -and $env:ProgramFiles){
+            $usersAt=[array]::IndexOf([string[]]$sweep,(Join-Path $env:SystemDrive 'Users'))
+            $pfAt=[array]::IndexOf([string[]]$sweep,$env:ProgramFiles)
+            if($usersAt -ne 0 -or $pfAt -le $usersAt){throw ('script sweep roots are not user-writable first: '+($sweep -join '; '))}
+            if($env:ProgramData -and [array]::IndexOf([string[]]$sweep,$env:ProgramData) -gt $pfAt){throw 'ProgramData is swept after Program Files'}
+        }
+        # Review #22: WMI consumers keep their class and command/script body.
+        $wmi=Get-SccGenericEvidence -Name 'WmiFixture' -Collector {
+            ConvertTo-SccWmiSubscriptionRow ([pscustomobject]@{CimClass=[pscustomobject]@{CimClassName='ActiveScriptEventConsumer'};Name='Updater';ScriptingEngine='VBScript';ScriptText='CreateObject("WScript.Shell").Run "x"';ScriptFileName=''})
+            ConvertTo-SccWmiSubscriptionRow ([pscustomobject]@{CimClass=[pscustomobject]@{CimClassName='CommandLineEventConsumer'};Name='Cmd';CommandLineTemplate='powershell -enc AAA';ExecutablePath='C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'})
+            ConvertTo-SccWmiSubscriptionRow ([pscustomobject]@{'__CLASS'='__EventFilter';Name='Filt';Query='SELECT * FROM __InstanceModificationEvent';QueryLanguage='WQL'})
+        }
+        if($wmi.Errors.Count -or $wmi.Items.Count -ne 3){throw 'WMI fixture rows were not collected'}
+        if($wmi.Items[0].'__CLASS' -ne 'ActiveScriptEventConsumer' -or $wmi.Items[0].ScriptingEngine -ne 'VBScript' -or $wmi.Items[0].ScriptText -notmatch 'WScript\.Shell'){throw 'ActiveScript consumer lost its class or script body'}
+        if($wmi.Items[1].'__CLASS' -ne 'CommandLineEventConsumer' -or $wmi.Items[1].CommandLineTemplate -ne 'powershell -enc AAA' -or $wmi.Items[1].ExecutablePath -notlike '*powershell.exe'){throw 'CommandLine consumer lost its class or command'}
+        if($wmi.Items[2].'__CLASS' -ne '__EventFilter' -or $wmi.Items[2].Query -notlike 'SELECT*'){throw 'event filter lost its class or query'}
+        # Review #21: the logon-type filter is part of the event-log query, so
+        # the 500-event cap applies only to interactive/RDP/cached logons.
+        $logonXPath=Get-SccLogonXPath -Days 14
+        foreach($needle in @('EventID=4624','timediff(@SystemTime) <= 1209600000',"Data[@Name='LogonType']='2'","Data[@Name='LogonType']='7'","Data[@Name='LogonType']='10'","Data[@Name='LogonType']='11'")){
+            if(-not $logonXPath.Contains($needle)){throw ('logon XPath lacks '+$needle+': '+$logonXPath)}
+        }
+        if($logonXPath -match "LogonType']='(3|5)'"){throw 'logon XPath admits network/service logons'}
+        if((Get-SccLogonXPath -LogonTypes @("10' or '1'='1")) -match "'1'='1"){throw 'logon type values are not sanitized'}
+        # The event-log service itself must accept the query (Application is readable without admin).
+        try {$null=Get-WinEvent -LogName Application -FilterXPath $logonXPath -MaxEvents 1 -ErrorAction Stop}
+        catch {if($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*'){throw ('event log rejected the logon XPath: '+$_.Exception.Message)}}
+        function Get-WinEvent {
+            [CmdletBinding()]param([string]$LogName,[string]$FilterXPath,[int]$MaxEvents)
+            $script:CapturedEventQuery=[pscustomobject]@{LogName=$LogName;FilterXPath=$FilterXPath;MaxEvents=$MaxEvents}
+            Write-Error -Message 'No matching fixture events' -ErrorId 'NoMatchingEventsFound' -ErrorAction Stop
+        }
+        $script:CapturedEventQuery=$null
+        $noLogons=@(Get-SccXPathEventRecords -LogName 'Security' -XPath $logonXPath -Maximum 500)
+        if($noLogons.Count -ne 0 -or -not $script:CapturedEventQuery -or $script:CapturedEventQuery.LogName -ne 'Security' -or $script:CapturedEventQuery.MaxEvents -ne 500 -or $script:CapturedEventQuery.FilterXPath -ne $logonXPath){throw 'logon query did not pass the XPath filter to Get-WinEvent'}
         function Get-WinEvent {
             [CmdletBinding()]param([hashtable]$FilterHashtable,[int]$MaxEvents)
             if($FilterHashtable.LogName -eq 'fixture-records'){[pscustomobject]@{TimeCreated=[datetime]'2020-01-01';Id=1;Message='fixture event'};return}

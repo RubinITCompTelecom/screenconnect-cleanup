@@ -38,6 +38,12 @@ public static class SccConsoleObserver {
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int mode);
     public static int Main(string[] args) {
         IntPtr window = GetConsoleWindow();
+        // Establish the fixture's visible starting condition before testing the
+        // child command. Window creation/showing can lag process startup.
+        if (window != IntPtr.Zero) {
+            ShowWindow(window, 5);
+            for (int i = 0; i < 100 && !IsWindowVisible(window); i++) System.Threading.Thread.Sleep(50);
+        }
         bool before = window != IntPtr.Zero && IsWindowVisible(window);
         int rc = -1;
         bool after = false;

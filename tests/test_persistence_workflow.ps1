@@ -138,7 +138,7 @@ echo ReplayRC=!PIPE_RC!`r`nexit /b !PIPE_RC!`r`n"
     Remove-Item Env:SCC_STUB_RC -ErrorAction SilentlyContinue
     Remove-Item Env:SCC_STUB_LOG -ErrorAction SilentlyContinue
 }
-$psHost=(Get-Command pwsh -ErrorAction Stop).Source
+$psHost = if ($PSVersionTable.PSEdition -eq 'Desktop') { Join-Path $PSHOME 'powershell.exe' } else { (Get-Command pwsh -ErrorAction Stop).Source }
 $whatIfWork=Join-Path $work 'direct WhatIf run'
 $whatIfOutput=& $psHost -NoProfile -File (Join-Path $root 'Invoke-PersistenceScan.ps1') -WorkDir $whatIfWork -WhatIf 2>&1
 if($LASTEXITCODE -ne 0){throw ('Direct WhatIf unexpectedly failed: '+($whatIfOutput -join ' | '))}

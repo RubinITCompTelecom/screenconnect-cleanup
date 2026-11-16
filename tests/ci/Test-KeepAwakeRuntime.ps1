@@ -42,7 +42,8 @@ function Get-HelperProcesses {
             $_.CommandLine -like '*Keep-Awake.ps1*'
         })
     } catch { }
-    return ,$items
+    # Enumerate here: callers pipe these CIM objects through Where-Object.
+    return $items
 }
 
 function Get-HelperForParent {
@@ -93,7 +94,8 @@ function Invoke-RunnerScenario {
         '    exit /b !SCC_RUNNER_RC!',
         ')',
         'start "" powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "%SCC_KEEP_AWAKE_HELPER%"',
-        ('timeout /t {0} /nobreak >nul' -f $RunnerSeconds),
+        # timeout.exe exits immediately when stdin is redirected by a CI host.
+        ('powershell.exe -NoProfile -NonInteractive -Command "Start-Sleep -Seconds {0}"' -f $RunnerSeconds),
         'exit /b 0'
     )
     [System.IO.File]::WriteAllLines($BatchPath, $batchLines, [System.Text.Encoding]::ASCII)

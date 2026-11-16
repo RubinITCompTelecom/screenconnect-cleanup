@@ -53,6 +53,9 @@ rem ---- Phase selection (offline / online split) ------------------------------
 rem No phase flag = the full pipeline exactly as before. The flags are plain
 rem arguments (not environment variables) so they survive the UAC relaunch below.
 set "SCC_PHASE=ALL"
+set "SCC_KVRT_STATE=NotRun"
+set "SCC_ESET_STATE=NotRun"
+set "SCC_MB_STATE=NotRun"
 set "SCC_PHASE_ARG="
 set "SCC_ELEV_ATTEMPTED=0"
 set "SCC_SELECT=0"
@@ -316,12 +319,16 @@ echo.
 if /i "!SCC_PHASE!"=="ONLINE" echo    -- 2a: KVRT --
 if /i not "!SCC_PHASE!"=="ONLINE" echo    -- 6a: KVRT --
 set /p GO="    Launch KVRT? [Y/n] "
+set "SCC_KVRT_STATE=Skipped"
 if /i not "%GO%"=="n" (
     if exist "!SCC_DP0!tools\AV\KVRT.exe" (
-        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Invoke-GUIScanner.ps1" -Scanner KVRT
+        if not exist "!SCC_RUN_ROOT!\logs" mkdir "!SCC_RUN_ROOT!\logs"
+        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Invoke-GUIScanner.ps1" -Scanner KVRT -ResultPath "!SCC_RUN_ROOT!\logs\scanner-KVRT-result.json"
+        set "SCC_KVRT_STATE=Exit:!errorlevel!"
         if errorlevel 1 echo        [WARN] KVRT launch failed with errorlevel !errorlevel! - see the message above
     ) else (
         echo        [WARN] tools\AV\KVRT.exe not staged - run step 1 first.
+        set "SCC_KVRT_STATE=NotStaged"
     )
 )
 set GO=
@@ -330,12 +337,16 @@ echo.
 if /i "!SCC_PHASE!"=="ONLINE" echo    -- 2b: ESET Online Scanner --
 if /i not "!SCC_PHASE!"=="ONLINE" echo    -- 6b: ESET Online Scanner --
 set /p GO="    Launch ESET Online Scanner? [Y/n] "
+set "SCC_ESET_STATE=Skipped"
 if /i not "%GO%"=="n" (
     if exist "!SCC_DP0!tools\AV\esetonlinescanner.exe" (
-        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Invoke-GUIScanner.ps1" -Scanner ESET
+        if not exist "!SCC_RUN_ROOT!\logs" mkdir "!SCC_RUN_ROOT!\logs"
+        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Invoke-GUIScanner.ps1" -Scanner ESET -ResultPath "!SCC_RUN_ROOT!\logs\scanner-ESET-result.json"
+        set "SCC_ESET_STATE=Exit:!errorlevel!"
         if errorlevel 1 echo        [WARN] ESET launch failed with errorlevel !errorlevel! - see the message above
     ) else (
         echo        [WARN] tools\AV\esetonlinescanner.exe not staged - run step 1 first.
+        set "SCC_ESET_STATE=NotStaged"
     )
 )
 set GO=
@@ -345,9 +356,11 @@ echo.
 if /i "!SCC_PHASE!"=="ONLINE" echo    -- 2c: Malwarebytes --
 if /i not "!SCC_PHASE!"=="ONLINE" echo    -- 6c: Malwarebytes --
 set /p GO="    Install and launch Malwarebytes now? [Y/n] "
+set "SCC_MB_STATE=Skipped"
 if /i "%GO%"=="n" goto :skip_6c
 if not exist "!SCC_RUN_ROOT!\logs" mkdir "!SCC_RUN_ROOT!\logs"
 powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Invoke-GUIScanner.ps1" -Scanner Malwarebytes -ResultPath "!SCC_RUN_ROOT!\logs\scanner-Malwarebytes-result.json"
+set "SCC_MB_STATE=Exit:!errorlevel!"
 if errorlevel 1 echo        [WARN] Malwarebytes wrapper exited with errorlevel !errorlevel! - see the result JSON and message above
 echo        Malwarebytes session ended - continuing.
 :skip_6c
@@ -429,7 +442,7 @@ set "RESET_GPO="
 set /p RESET_GPO="    Back up, then reset local Group Policy folders? [y/N] "
 set "RESET_GPO_ARGS="
 if /i "!RESET_GPO!"=="y" set "RESET_GPO_ARGS=-ResetLocalGpo"
-powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Repair-PowerOptions.ps1" -Apply -Confirm:$false -WorkDir "!SCC_RUN_ROOT!" -ResultPath "!SCC_RUN_ROOT!\power-options-repair.json" !RESET_GPO_ARGS!
+powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Repair-PowerOptions.ps1" -Apply -WorkDir "!SCC_RUN_ROOT!" -ResultPath "!SCC_RUN_ROOT!\power-options-repair.json" !RESET_GPO_ARGS!
 set "POWER_REPAIR_RC=!errorlevel!"
 set "POWER_REPAIR_RAN=0"
 if exist "!SCC_RUN_ROOT!\power-options-repair.json" set "POWER_REPAIR_RAN=1"
@@ -451,7 +464,9 @@ if not exist "!SCC_RUN_ROOT!\snapshot_before.json" (
     if not exist "!SCC_RUN_ROOT!\snapshot_after.json" (
         echo     [WARN] After-snapshot was not written - skipping the diff.
     ) else (
-        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!diff-snapshots.ps1" -BeforeFile "!SCC_RUN_ROOT!\snapshot_before.json" -AfterFile "!SCC_RUN_ROOT!\snapshot_after.json" -OutFile "!SCC_RUN_ROOT!\snapshot_diff.json"
+        set "SCC_DIFF_MANIFEST="
+        if exist "!SCC_RUN_ROOT!\removal-manifest.json" set "SCC_DIFF_MANIFEST=-RemovalManifest "!SCC_RUN_ROOT!\removal-manifest.json""
+        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!diff-snapshots.ps1" -BeforeFile "!SCC_RUN_ROOT!\snapshot_before.json" -AfterFile "!SCC_RUN_ROOT!\snapshot_after.json" -OutFile "!SCC_RUN_ROOT!\snapshot_diff.json" !SCC_DIFF_MANIFEST!
         rem exit 1 from diff = RESURRECTION detected, a finding not a failure
         if errorlevel 2 (
             echo     [WARN] Diff failed to run.
@@ -469,14 +484,22 @@ if /i "!SCC_PHASE!"=="OFFLINE" echo  STEP 7/7: Report (kept on this PC, not uplo
 if /i not "!SCC_PHASE!"=="OFFLINE" echo  STEP 9/9: Report
 set "SCC_KEPT_ARG="
 if exist "!SCC_RUN_ROOT!\kept-instances.json" set "SCC_KEPT_ARG=-KeptInstances "!SCC_RUN_ROOT!\kept-instances.json""
+rem A declined/not-run power repair leaves no result file: pass the file only when it exists, so the report omits the section
+rem instead of showing "Unknown / incomplete". Scanner status: the Malwarebytes result when there is one, else "skipped"
+rem (the report makes no malware claim either way).
+set "SCC_POWER_ARG="
+if exist "!SCC_RUN_ROOT!/power-options-repair.json" set "SCC_POWER_ARG=-PowerOptionsRepair "!SCC_RUN_ROOT!/power-options-repair.json""
+powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Write-ScannerSummary.ps1" -WorkDir "!SCC_RUN_ROOT!" -KvrtState !SCC_KVRT_STATE! -EsetState !SCC_ESET_STATE! -MalwarebytesState !SCC_MB_STATE!
+set "SCC_SCAN_ARG="
+if exist "!SCC_RUN_ROOT!\scanner_results.json" set "SCC_SCAN_ARG=-ScannerSummary "!SCC_RUN_ROOT!\scanner_results.json""
 if not defined FINDINGS_JSON (
     echo     [WARN] No current-run findings.json available - skipping report.
 ) else (
     if exist "!FINDINGS_JSON!" (
     if exist "!SCC_RUN_ROOT!/removal-manifest.json" (
-        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!New-InvestigationReport.ps1" -FindingsJson "!FINDINGS_JSON!" !SCC_KEPT_ARG! -RemovalManifest "!SCC_RUN_ROOT!/removal-manifest.json" -PersistenceInventory "!SCC_RUN_ROOT!\persistence\inventory.json" -PersistenceRemoval "!SCC_RUN_ROOT!\persistence\removal.json" -PersistenceResult "!SCC_RUN_ROOT!\persistence\result.json" -PowerOptionsRepair "!SCC_RUN_ROOT!/power-options-repair.json" -OutputPath "!SCC_RUN_ROOT!/report.html"
+        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!New-InvestigationReport.ps1" -FindingsJson "!FINDINGS_JSON!" !SCC_KEPT_ARG! -RemovalManifest "!SCC_RUN_ROOT!/removal-manifest.json" -PersistenceInventory "!SCC_RUN_ROOT!\persistence\inventory.json" -PersistenceRemoval "!SCC_RUN_ROOT!\persistence\removal.json" -PersistenceResult "!SCC_RUN_ROOT!\persistence\result.json" !SCC_POWER_ARG! !SCC_SCAN_ARG! -OutputPath "!SCC_RUN_ROOT!/report.html"
     ) else (
-        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!New-InvestigationReport.ps1" -FindingsJson "!FINDINGS_JSON!" !SCC_KEPT_ARG! -PersistenceInventory "!SCC_RUN_ROOT!\persistence\inventory.json" -PersistenceRemoval "!SCC_RUN_ROOT!\persistence\removal.json" -PersistenceResult "!SCC_RUN_ROOT!\persistence\result.json" -PowerOptionsRepair "!SCC_RUN_ROOT!/power-options-repair.json" -OutputPath "!SCC_RUN_ROOT!/report.html"
+        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!New-InvestigationReport.ps1" -FindingsJson "!FINDINGS_JSON!" !SCC_KEPT_ARG! -PersistenceInventory "!SCC_RUN_ROOT!\persistence\inventory.json" -PersistenceRemoval "!SCC_RUN_ROOT!\persistence\removal.json" -PersistenceResult "!SCC_RUN_ROOT!\persistence\result.json" !SCC_POWER_ARG! !SCC_SCAN_ARG! -OutputPath "!SCC_RUN_ROOT!/report.html"
     )
         set "REPORT_RC=!errorlevel!"
         set "REPORT_OPENED=0"
@@ -670,8 +693,13 @@ set "SCC_OR_ARGS="
 if exist "!SCC_RUN_ROOT!\removal-manifest.json" set "SCC_OR_ARGS=-RemovalManifest "!SCC_RUN_ROOT!\removal-manifest.json""
 if exist "!SCC_RUN_ROOT!\kept-instances.json" set "SCC_OR_ARGS=!SCC_OR_ARGS! -KeptInstances "!SCC_RUN_ROOT!\kept-instances.json""
 set "SCC_AS=!SCC_RUN_ROOT!\after-scans\persistence"
+set "SCC_POWER_ARG="
+if exist "!SCC_RUN_ROOT!\power-options-repair.json" set "SCC_POWER_ARG=-PowerOptionsRepair "!SCC_RUN_ROOT!\power-options-repair.json""
+powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Write-ScannerSummary.ps1" -WorkDir "!SCC_RUN_ROOT!" -KvrtState !SCC_KVRT_STATE! -EsetState !SCC_ESET_STATE! -MalwarebytesState !SCC_MB_STATE!
+set "SCC_SCAN_ARG="
+if exist "!SCC_RUN_ROOT!\scanner_results.json" set "SCC_SCAN_ARG=-ScannerSummary "!SCC_RUN_ROOT!\scanner_results.json""
 echo     [i] Building the report again with the persistence check from after the scans.
-powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!New-InvestigationReport.ps1" -FindingsJson "!FINDINGS_JSON!" !SCC_OR_ARGS! -PersistenceInventory "!SCC_AS!\inventory.json" -PersistenceRemoval "!SCC_AS!\removal.json" -PersistenceResult "!SCC_AS!\result.json" -PowerOptionsRepair "!SCC_RUN_ROOT!\power-options-repair.json" -OutputPath "!SCC_RUN_ROOT!\report-after-scans.html"
+powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!New-InvestigationReport.ps1" -FindingsJson "!FINDINGS_JSON!" !SCC_OR_ARGS! -PersistenceInventory "!SCC_AS!\inventory.json" -PersistenceRemoval "!SCC_AS!\removal.json" -PersistenceResult "!SCC_AS!\result.json" !SCC_POWER_ARG! !SCC_SCAN_ARG! -OutputPath "!SCC_RUN_ROOT!\report-after-scans.html"
 if exist "!SCC_RUN_ROOT!\report-after-scans.html" (
     set "SCC_SHARE_REPORT=!SCC_RUN_ROOT!\report-after-scans.html"
     set "SCC_SHARE_PDIR=!SCC_AS!"

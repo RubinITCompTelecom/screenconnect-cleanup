@@ -46,6 +46,15 @@ try {
         Check "$count real errors fail closed" ($r.Rc -eq 1 -and $r.Diff.Verdict -eq 'INCOMPLETE')
         Check "$count real errors remain flat" (@($r.Diff.AfterCollectionErrors).Count -eq $count -and $r.Diff.AfterCollectionErrors[0].Section -eq 'Services')
     }
+    # Informational-section errors are reported but never change the verdict;
+    # an unknown/missing Section name still gates (fail closed).
+    $snapshot.CollectionErrors = @([pscustomobject]@{ Section = 'Prefetch'; Error = 'fixture prefetch denied' })
+    $r = Invoke-Fixture $snapshot
+    Check 'informational error alone stays CLEAN' ($r.Rc -eq 0 -and $r.Diff.Verdict -eq 'CLEAN' -and @($r.Diff.InformationalCollectionErrors).Count -eq 2 -and $r.Diff.AfterCollectionComplete -eq $true)
+    $snapshot.CollectionErrors = @([pscustomobject]@{ Error = 'fixture error with no section' })
+    $r = Invoke-Fixture $snapshot
+    Check 'error without a Section name fails closed' ($r.Rc -eq 1 -and $r.Diff.Verdict -eq 'INCOMPLETE')
+    $snapshot.CollectionErrors = @()
 } finally {
     Remove-Item -LiteralPath $tmp -Recurse -Force
 }

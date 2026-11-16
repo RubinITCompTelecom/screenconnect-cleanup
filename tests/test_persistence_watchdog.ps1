@@ -134,11 +134,16 @@ Export-ModuleMember -Function Get-SccPersistenceInventory
         }
         [IO.File]::WriteAllText((Join-Path $temp 'Persistence.Inventory.psm1'),$fixture,[Text.Encoding]::ASCII)
         $caseRun=Join-Path $temp $mode
-        $psi.Arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+(Join-Path $temp 'Invoke-PersistenceScan.ps1')+'" -WorkDir "'+$caseRun+'" -NoPrompt -InventorySectionTimeoutSeconds 4 -InventoryTotalTimeoutSeconds '+$(if($mode -eq 'TotalBudget'){'2'}else{'10'})
+        # Keep the deliberate stall/failure deadlines short, but allow the
+        # successful fixture to start its extra Windows PowerShell process on CI.
+        $sectionBudget=if($mode -eq 'Complete'){15}else{4}
+        $totalBudget=if($mode -eq 'Complete'){45}elseif($mode -eq 'TotalBudget'){2}else{10}
+        $psi.Arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+(Join-Path $temp 'Invoke-PersistenceScan.ps1')+'" -WorkDir "'+$caseRun+'" -NoPrompt -InventorySectionTimeoutSeconds '+$sectionBudget+' -InventoryTotalTimeoutSeconds '+$totalBudget
         $case=[Diagnostics.Process]::Start($psi)
         $caseOut=$case.StandardOutput.ReadToEndAsync();$caseErr=$case.StandardError.ReadToEndAsync()
         try {
-            if(-not $case.WaitForExit(25000)){$case.Kill();throw ($mode+' fixture exceeded bounded wait')}
+            $waitMs=if($mode -eq 'Complete'){60000}else{25000}
+            if(-not $case.WaitForExit($waitMs)){$case.Kill();throw ($mode+' fixture exceeded bounded wait')}
             $data=[IO.File]::ReadAllText((Join-Path (Join-Path $caseRun 'persistence') 'result.json'))|ConvertFrom-Json
             $casePidFile=Join-Path (Join-Path $caseRun 'persistence') 'fixture-PID.txt'
             if(Test-Path -LiteralPath $casePidFile){

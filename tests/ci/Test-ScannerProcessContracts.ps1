@@ -67,7 +67,8 @@ else {
     # deterministic, network-free behavior test. The real code must render an
     # actual PowerShell progress record even though the IWR fallback remains
     # globally suppressed for throughput.
-    $start = $text.IndexOf('function Start-DownloadFast {')
+    # Start at the stall-limit variable so Test-BitsStall (used by the loop) is loaded too.
+    $start = $text.IndexOf('$script:BitsStallSeconds')
     $end = $text.IndexOf('function Get-DownloadFile {', $start)
     if ($start -lt 0 -or $end -le $start) {
         Add-Failure 'Get-AVTools.ps1 BITS download helper cannot be isolated for the progress probe.'

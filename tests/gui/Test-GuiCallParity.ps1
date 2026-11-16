@@ -230,7 +230,7 @@ try {
     [void](Initialize-GuiRunRoot -Session $s)
     $g = Invoke-GuiHeadless $s $desktop 'gui-detect'
     $names = @($g.Trace | ForEach-Object { $_.Split('|')[0] })
-    Check (($names -join ',') -eq 'preflight.ps1,collect-snapshot.ps1,detect-remote-access.ps1,New-InvestigationReport.ps1') 'detect-only runs preflight, before snapshot, detection and the report - nothing else'
+    Check (($names -join ',') -eq 'preflight.ps1,collect-snapshot.ps1,detect-remote-access.ps1,Write-ScannerSummary.ps1,New-InvestigationReport.ps1') 'detect-only runs preflight, snapshot, detection and local report preparation'
     foreach ($never in 'Invoke-ReviewAndRemove.ps1', 'remove-screenconnect.ps1', 'Invoke-PersistenceScan.ps1', 'Submit-ConnectWiseReport.ps1', 'Repair-PowerOptions.ps1', 'Invoke-AVUninstaller.ps1') {
         Check (-not (Has $g $never)) ('detect-only never runs ' + $never)
     }
@@ -247,8 +247,8 @@ try {
     Check (-not (Has $g 'Show-PersistenceReview.ps1')) 'declining the review windows skips Show-PersistenceReview'
     Check (Has $g 'Invoke-AVUninstaller.ps1') 'AV uninstall runs only when asked'
     $pr = @($g.Trace | Where-Object { $_ -like 'Repair-PowerOptions.ps1|*' })[0]
-    Check ($pr -like '*-Apply -Confirm*false*' -and $pr -like '*-ResetLocalGpo') 'power repair with the GPO reset passes -ResetLocalGpo last, like the batch file'
-    if (-not ($pr -like '*-Apply -Confirm*false*' -and $pr -like '*-ResetLocalGpo')) { Write-Host ('  actual: ' + $pr) }
+    Check ($pr -like '*-Apply -WorkDir*' -and $pr -notlike '*-Confirm*' -and $pr -like '*-ResetLocalGpo') 'power repair with the GPO reset passes -ResetLocalGpo last (and no -Confirm string), like the batch file'
+    if (-not ($pr -like '*-Apply -WorkDir*' -and $pr -notlike '*-Confirm*' -and $pr -like '*-ResetLocalGpo')) { Write-Host ('  actual: ' + $pr) }
     Check ($s.PowerRepairRan -eq $false) 'PowerRepairRan reflects whether the repair wrote its result (stub wrote none)'
 
     # ============================================================ when a step fails

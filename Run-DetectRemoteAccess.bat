@@ -8,6 +8,9 @@ REM
 REM Right-click "Run as administrator" for the full picture: without admin the
 REM System event log (service install history) is usually unreadable. The
 REM report says so when that happens.
+REM
+REM Nothing is uploaded by default. To share the report, add -ShareReport
+REM (for example from a prompt: Run-DetectRemoteAccess.bat -ShareReport).
 
 rem ---- Self-elevate: at most ONE UAC prompt, decided by the real admin token --
 rem The script path and forwarded arguments travel via environment variables

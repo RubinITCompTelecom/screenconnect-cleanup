@@ -216,7 +216,7 @@ try {
     else {
         $s = $r.State
         Check ($r.Done -and $r.Exit -eq 0) 'the window ran, closed itself and exited 0'
-        Check (($r.Names -join ',') -eq 'preflight.ps1,collect-snapshot.ps1,detect-remote-access.ps1,remove-screenconnect.ps1,Invoke-PersistenceScan.ps1,collect-snapshot.ps1,diff-snapshots.ps1,New-InvestigationReport.ps1,Submit-ConnectWiseReport.ps1') ('offline calls in the batch file''s order (the real review script reached the stub remover): ' + ($r.Names -join ', '))
+        Check (($r.Names -join ',') -eq 'preflight.ps1,collect-snapshot.ps1,detect-remote-access.ps1,remove-screenconnect.ps1,Invoke-PersistenceScan.ps1,collect-snapshot.ps1,diff-snapshots.ps1,Write-ScannerSummary.ps1,New-InvestigationReport.ps1,Submit-ConnectWiseReport.ps1') ('offline calls in the batch file''s order (the real review script reached the stub remover): ' + ($r.Names -join ', '))
         $plan = Get-Plan $s.RunRoot
         Check ($plan -and $plan.Decision -eq 'PARTIAL_REMOVE') 'the real review script wrote a PARTIAL_REMOVE plan'
         Check ($plan -and (Ids $plan.ScreenConnectInstances) -eq 'aaaa1111aaaa1111,cccc3333cccc3333') 'the plan removes only the two instances left on Remove'
@@ -314,7 +314,7 @@ try {
     if ($r.State) {
         $plan = Get-Plan $r.State.RunRoot
         Check ($plan -and $plan.Decision -eq 'ALL_REMOVE' -and @($plan.ScreenConnectInstances).Count -eq 3) 'keeping nothing removes all three (the batch file''s default)'
-        Check ((($r.Names) -join ',') -eq 'preflight.ps1,collect-snapshot.ps1,detect-remote-access.ps1,remove-screenconnect.ps1,Invoke-PersistenceScan.ps1,Show-PersistenceReview.ps1,Repair-PowerOptions.ps1,collect-snapshot.ps1,diff-snapshots.ps1,New-InvestigationReport.ps1,Submit-ConnectWiseReport.ps1') ('every optional offline step ran, in the batch file''s order: ' + ($r.Names -join ', '))
+        Check ((($r.Names) -join ',') -eq 'preflight.ps1,collect-snapshot.ps1,detect-remote-access.ps1,remove-screenconnect.ps1,Invoke-PersistenceScan.ps1,Show-PersistenceReview.ps1,Repair-PowerOptions.ps1,collect-snapshot.ps1,diff-snapshots.ps1,Write-ScannerSummary.ps1,New-InvestigationReport.ps1,Submit-ConnectWiseReport.ps1') ('every optional offline step ran, in the batch file''s order: ' + ($r.Names -join ', '))
         $pr = @($r.Calls | Where-Object { $_ -like 'Repair-PowerOptions.ps1|*' })[0]
         Check ($pr -like '*-ResetLocalGpo') 'power repair with the GPO reset passes -ResetLocalGpo last'
         Check ($r.State.RestartVisible -eq $true) 'the restart offer appears: a repair ran, the report was written and opened'

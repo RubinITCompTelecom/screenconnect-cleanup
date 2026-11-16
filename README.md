@@ -33,7 +33,7 @@ Double-click `START-HERE-GUI.bat`, approve the administrator prompt, pick what t
 | Choice | Internet | What it does |
 |---|---|---|
 | **Offline** | not needed | The cleanup: preflight, before snapshot, detection, removal of the ScreenConnect you choose, persistence review, optional power-options repair, after snapshot + diff, local report. Downloads and uploads nothing. |
-| **Online** | needed | Downloads and runs KVRT, ESET Online Scanner and Malwarebytes, checks startup items again after the scans, optional AV uninstall, shares the report. Continues this PC's last Offline run if there is one. |
+| **Online** | needed | Downloads and runs KVRT, ESET Online Scanner and Malwarebytes, checks startup items again after the scans, optional AV uninstall, shares the report if the box is ticked. Continues this PC's last Offline run if there is one. |
 | **Detect only** | not needed | Preflight, snapshot, detection and the report. Changes nothing. Use it to look before you decide. |
 | **Stage tools** | needed | Downloads the scanners into the tool folder for later. Changes nothing on the PC. |
 
@@ -58,7 +58,8 @@ matters: a host you do not recognise is the scammer's.
 3. When asked to open the review windows, say **Yes** and go through them (see below).
 4. Read the report. It opens by itself and a copy is left on the Desktop.
 5. **Reconnect** and run **Online**. Say yes to continuing the offline run; run the scanners you want.
-   The sanitized report is shared at the end and the link appears in the window and in the report.
+   If *Share the sanitized report* is ticked (it is by default), the report is shared at the end and the
+   link appears in the window and in the report. Untick it and nothing is uploaded.
 
 A PC that must stay offline: run only **Offline**. Everything stays in `C:\RIT-SCC\<PC>-<id>\` and
 nothing is shared.
@@ -102,11 +103,19 @@ the user can tamper with it between the two halves):
 | `quarantine\...`, `removal-manifest.json` | Everything removed, **moved here, never deleted**, with original path and hash. |
 | `detect\`, snapshots, `logs\` | Raw evidence, before/after snapshots and every step's log. |
 
-**Sharing.** The Online half posts the sanitized report to the MicroBin server in
-`files\microbin-url.txt` (read-only, expires after one week) and puts the link at the top of the
-report. It contains relay hosts, thumbprints, file names and hashes, and install dates; it does
-**not** contain raw config, evidence, account names, credentials or keys. The Offline half and
-Detect only never upload anything.
+**Sharing (your choice).** The Online choice has a tick box, *Share the sanitized report*, ticked by
+default. Ticked: the report is posted to the MicroBin server in `files\microbin-url.txt` (read-only,
+deleted after one week) and the link goes at the top of the report. Unticked: nothing is uploaded and
+everything stays on this PC. The Offline half and Detect only never upload anything.
+
+**What is shared:** ScreenConnect relay hosts, instance IDs and thumbprints, file names and hashes,
+install dates and an anonymous PC ID (a short hash, not the computer name). **Nothing personal is
+sent:** no computer name, user or account names, network address of the PC, raw config, evidence,
+credentials or keys, and user folder names are replaced by `<USERPROFILE>`. The copy on this PC
+(`connectwise-report.zip` and `report.html`) keeps the full details.
+
+**Sharing is not a report to ConnectWise.** It gives your team one link with what ConnectWise needs (the
+relay host and instance ID) to shut down the scammer's server; you file that report yourself.
 
 ---
 

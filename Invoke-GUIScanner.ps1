@@ -45,13 +45,16 @@
 
   Search order when -ToolPath is not given (KVRT/ESET):
     tools\AV\<name>.exe next to this script, then legacy AV\ and the bare
-    script root, then ..\tools\AV, then the user's Downloads folder, then TEMP.
+    script root, then ..\tools\AV. Downloads and TEMP are NOT searched (user-
+    writable, would be launched elevated). A found EXE must carry a valid
+    Authenticode signature from the vendor (Kaspersky / ESET) or it is refused.
     If not found: exits 3 with a clear message; nothing is downloaded here -
     staging is tools\Get-AVTools.ps1's job.
     Malwarebytes tries `winget install -e --id Malwarebytes.Malwarebytes` first.
     If winget is missing, returns a nonzero code, or installs without a usable
     GUI, the official `https://downloads.malwarebytes.com/file/mb5_offline`
-    installer is downloaded to TEMP, validated, launched visibly, and followed
+    installer is downloaded fresh into a locked folder under the run root
+    (Administrators + SYSTEM only), validated, signature-checked, launched visibly, and followed
     by the attended mbam.exe GUI launch.
 
   NOTES
@@ -83,18 +86,6 @@ Set-StrictMode -Version 2.0
 
 $start = Get-Date
 
-function Get-TempRoot {
-    if ($env:TEMP) { return $env:TEMP }
-    if ($env:TMP) { return $env:TMP }
-    return (Get-Location).Path
-}
-
-function Get-HomeDir {
-    if ($env:USERPROFILE) { return $env:USERPROFILE }
-    if ($env:HOME) { return $env:HOME }
-    return ''
-}
-
 $knownTools = @{
     'KVRT' = 'KVRT.exe'
     'ESET' = 'esetonlinescanner.exe'
@@ -124,6 +115,109 @@ function Test-PeExecutable {
     } catch {
         return $false
     }
+}
+
+# Vendor signer table. A scanner EXE is launched elevated, so it must carry a
+# VALID Authenticode signature whose signer ORGANISATION (the O= part of the
+# certificate subject) is the vendor. Tests stub Get-AuthenticodeSignature.
+$script:ScannerVendors = @{ 'KVRT' = 'Kaspersky'; 'ESET' = 'ESET' }
+$script:VendorSignerPatterns = @{
+    'Malwarebytes' = '^Malwarebytes(\s|$)'
+    'Kaspersky'    = '^(Z?AO\s+)?Kaspersky(\s|$)'
+    'ESET'         = '^ESET(\s|,|$)'
+}
+
+function Get-SignerOrganization {
+    # Returns the value of the first O= attribute of a certificate subject, or
+    # $null. Walks the string so a quoted value that merely CONTAINS ", O=x"
+    # cannot be mistaken for the attribute.
+    param([string]$Subject)
+    if ([string]::IsNullOrWhiteSpace($Subject)) { return $null }
+    $parts = New-Object System.Collections.ArrayList
+    $sb = New-Object System.Text.StringBuilder
+    $inQuote = $false
+    for ($i = 0; $i -lt $Subject.Length; $i++) {
+        $ch = $Subject[$i]
+        if ($ch -eq '"') {
+            if ($inQuote -and ($i + 1) -lt $Subject.Length -and $Subject[$i + 1] -eq '"') {
+                [void]$sb.Append('"'); $i++; continue
+            }
+            $inQuote = -not $inQuote
+            continue
+        }
+        if ($ch -eq ',' -and -not $inQuote) {
+            [void]$parts.Add($sb.ToString()); [void]$sb.Clear(); continue
+        }
+        [void]$sb.Append($ch)
+    }
+    [void]$parts.Add($sb.ToString())
+    foreach ($part in $parts) {
+        $m = [regex]::Match($part, '^\s*O\s*=\s*(.*?)\s*$')
+        if ($m.Success) { return $m.Groups[1].Value }
+    }
+    return $null
+}
+
+function Test-VendorSignature {
+    # Valid = Authenticode Status 'Valid' AND signer organisation matches the
+    # vendor pattern. Fails closed: any read error, unknown vendor, missing
+    # certificate or other status returns Valid = $false with an Error reason.
+    param([string]$Path, [string]$Vendor)
+    $r = [ordered]@{ Valid = $false; Status = $null; Signer = $null; Error = $null }
+    try {
+        if (-not $Vendor -or -not $script:VendorSignerPatterns.ContainsKey($Vendor)) {
+            throw ("No signer rule for vendor '" + $Vendor + "'.")
+        }
+        $sig = Get-AuthenticodeSignature -LiteralPath $Path -ErrorAction Stop
+        $r.Status = [string]$sig.Status
+        if ($r.Status -ne 'Valid') { throw ("Authenticode status is " + $r.Status + ", not Valid.") }
+        if ($null -eq $sig.SignerCertificate) { throw 'No signer certificate.' }
+        $org = Get-SignerOrganization -Subject ([string]$sig.SignerCertificate.Subject)
+        $r.Signer = $org
+        if (-not $org) { throw 'Signer certificate has no organisation (O=).' }
+        if ($org -notmatch $script:VendorSignerPatterns[$Vendor]) {
+            throw ("Signed by '" + $org + "', not by " + $Vendor + '.')
+        }
+        $r.Valid = $true
+    } catch {
+        $r.Valid = $false
+        $r.Error = $_.Exception.Message
+    }
+    return [pscustomobject]$r
+}
+
+function Get-RunDownloadParent {
+    # Where scanner downloads live: next to the result artifact (inside the
+    # run's own folder) when -ResultPath is given, else C:\RIT-SCC. Never TEMP.
+    param([string]$ResultPath)
+    if ($ResultPath) {
+        $dir = Split-Path -Parent $ResultPath
+        if ($dir) { return $dir }
+    }
+    $drive = if ($env:SystemDrive) { $env:SystemDrive } else { 'C:' }
+    return (Join-Path ($drive + '\') 'RIT-SCC')
+}
+
+function New-LockedDownloadDir {
+    # Fresh, uniquely named folder that only Administrators and SYSTEM can
+    # touch (inheritance cut), so a standard user cannot swap a file between
+    # download, validation and elevated launch.
+    param([string]$Parent)
+    if (-not (Test-Path -LiteralPath $Parent)) { $null = New-Item -ItemType Directory -Path $Parent -Force }
+    $dir = Join-Path $Parent ('scanner-download-' + [guid]::NewGuid().ToString('N'))
+    $null = New-Item -ItemType Directory -Path $dir -ErrorAction Stop
+    $acl = New-Object System.Security.AccessControl.DirectorySecurity
+    $acl.SetAccessRuleProtection($true, $false)
+    $inherit = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+    foreach ($sidText in 'S-1-5-32-544', 'S-1-5-18') {
+        $sid = New-Object System.Security.Principal.SecurityIdentifier($sidText)
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $sid, [System.Security.AccessControl.FileSystemRights]::FullControl, $inherit,
+            [System.Security.AccessControl.PropagationFlags]::None,
+            [System.Security.AccessControl.AccessControlType]::Allow)))
+    }
+    Set-Acl -LiteralPath $dir -AclObject $acl -ErrorAction Stop
+    return $dir
 }
 
 $script:MalwarebytesFallbackUrl = 'https://downloads.malwarebytes.com/file/mb5_offline'
@@ -165,35 +259,32 @@ function Invoke-MalwarebytesOfflineFallback {
 
     try {
         if (-not $DestinationRoot) {
-            $DestinationRoot = Join-Path (Get-TempRoot) 'ScreenConnectCleanup\Malwarebytes'
+            $DestinationRoot = New-LockedDownloadDir -Parent (Get-RunDownloadParent -ResultPath '')
         }
         if (-not (Test-Path -LiteralPath $DestinationRoot)) {
             $null = New-Item -ItemType Directory -Path $DestinationRoot -Force
         }
 
+        # Always a fresh download: a file already sitting at a predictable path
+        # is never trusted or reused.
         $installer = Join-Path $DestinationRoot 'MalwarebytesOfflineSetup.exe'
         $part = $installer + '.part'
-        $validExisting = $false
-        if (Test-Path -LiteralPath $installer) {
-            try {
-                $existing = Get-Item -LiteralPath $installer -ErrorAction Stop
-                $validExisting = ($existing.Length -ge $script:MalwarebytesFallbackMinimumBytes -and
-                                  (Test-PeExecutable -Path $installer))
-            } catch { $validExisting = $false }
+        foreach ($stale in $part, $installer) {
+            if (Test-Path -LiteralPath $stale) { Remove-Item -LiteralPath $stale -Force -ErrorAction Stop }
         }
+        Write-Host ("Downloading Malwarebytes fallback installer: " + $FallbackUrl) -ForegroundColor Cyan
+        Invoke-WebRequest -Uri $FallbackUrl -OutFile $part -UseBasicParsing -ErrorAction Stop
+        $downloaded = Get-Item -LiteralPath $part -ErrorAction Stop
+        if ($downloaded.Length -lt $script:MalwarebytesFallbackMinimumBytes -or
+            -not (Test-PeExecutable -Path $part)) {
+            throw 'Malwarebytes fallback download is not a valid Windows executable.'
+        }
+        Move-Item -LiteralPath $part -Destination $installer -Force -ErrorAction Stop
 
-        if (-not $validExisting) {
-            if (Test-Path -LiteralPath $part) {
-                Remove-Item -LiteralPath $part -Force -ErrorAction SilentlyContinue
-            }
-            Write-Host ("Downloading Malwarebytes fallback installer: " + $FallbackUrl) -ForegroundColor Cyan
-            Invoke-WebRequest -Uri $FallbackUrl -OutFile $part -UseBasicParsing -ErrorAction Stop
-            $downloaded = Get-Item -LiteralPath $part -ErrorAction Stop
-            if ($downloaded.Length -lt $script:MalwarebytesFallbackMinimumBytes -or
-                -not (Test-PeExecutable -Path $part)) {
-                throw 'Malwarebytes fallback download is not a valid Windows executable.'
-            }
-            Move-Item -LiteralPath $part -Destination $installer -Force -ErrorAction Stop
+        $sigCheck = Test-VendorSignature -Path $installer -Vendor 'Malwarebytes'
+        if (-not $sigCheck.Valid) {
+            Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
+            throw ('Malwarebytes installer refused - signature check failed: ' + $sigCheck.Error)
         }
 
         $fallback.InstallerPath = $installer
@@ -370,17 +461,12 @@ if ($ToolPath) {
         # Search order: Get-AVTools.ps1's canonical staging sibling (tools\AV\) first
         # (its default $ToolDir is <Get-AVTools script dir>\AV), then legacy AV\ and
         # the bare script root, then ..\tools\AV (covers invoking this script from
-        # inside tools\), then the user's Downloads and %TEMP% as fallbacks.
+        # inside tools\), (never Downloads or %TEMP%: user-writable).
         $candidates = @(
             (Join-Path $scriptRoot ('tools\AV\' + $name)),
             (Join-Path $scriptRoot ('AV\' + $name)),
             (Join-Path $scriptRoot $name),
             (Join-Path $scriptRoot ('..\tools\AV\' + $name))
-        )
-        $homeDir = Get-HomeDir
-        if ($homeDir) { $candidates += (Join-Path $homeDir ('Downloads\' + $name)) }
-        $candidates += @(
-            (Join-Path (Get-TempRoot) $name)
         )
         foreach ($c in $candidates) {
             if ($c -and (Test-Path -LiteralPath $c)) { $target = $c; break }
@@ -391,6 +477,13 @@ if ($ToolPath) {
             exit 3
         }
         $toolLabel = Split-Path -Leaf $target
+        # Launched elevated: must be validly signed by the vendor.
+        $vendorSig = Test-VendorSignature -Path $target -Vendor $script:ScannerVendors[$Scanner]
+        if (-not $vendorSig.Valid) {
+            Write-Host ("Refusing to launch " + $target + " - signature check failed: " + $vendorSig.Error) -ForegroundColor Red
+            Write-Host "Re-run Step 1 - Get-AVTools.ps1 to re-stage a genuine copy." -ForegroundColor Yellow
+            exit 3
+        }
     } elseif ($wingetScanners.ContainsKey($Scanner)) {
         # Malwarebytes: winget install (attended - visible console).
         $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
@@ -709,7 +802,8 @@ if ($wingetViaCmd -and -not $timedOut -and $exitCode -eq 0) {
 # Malwarebytes GUI are both launched visibly and the GUI remains attended.
 if ($fallbackRequested -or $installFailed -or $launchFailed) {
     $fallbackUsed = $true
-    $fallbackRoot = Join-Path (Get-TempRoot) 'ScreenConnectCleanup\Malwarebytes'
+    $fallbackRoot = $null
+    try { $fallbackRoot = New-LockedDownloadDir -Parent (Get-RunDownloadParent -ResultPath $ResultPath) } catch { Write-Host ('  [WARN] Could not create locked download folder: ' + $_.Exception.Message) -ForegroundColor Yellow }
     $fallbackResult = Invoke-MalwarebytesOfflineFallback `
         -TimeoutMinutes $TimeoutMinutes `
         -DestinationRoot $fallbackRoot `

@@ -166,7 +166,7 @@ function Get-Sha256Hex {
 }
 
 function Get-PathIdentityHash {
-    param([Parameter(Mandatory = $true)][string]$Path)
+    param([Parameter(Mandatory = $true)][string]$Path, [ref]$FileHashes)
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
     if (-not $item.PSIsContainer) {
         $hash = Get-Sha256File -Path $Path
@@ -181,13 +181,18 @@ function Get-PathIdentityHash {
         }
     }
     $lines = New-Object System.Collections.Generic.List[string]
+    $rows = New-Object System.Collections.Generic.List[object]
     foreach ($child in @($allChildren | Where-Object { -not $_.PSIsContainer })) {
         $hash = Get-Sha256File -Path $child.FullName
         if (-not $hash) { throw "Could not hash source tree file: $($child.FullName)" }
+        if ($null -ne $FileHashes) {
+            $rows.Add([pscustomobject]@{ Path = $child.FullName; Length = $child.Length; SHA256 = $hash })
+        }
         $relative = $child.FullName.Substring($rootFull.Length).TrimStart([char[]]@([char]92, [char]47))
         [void]$lines.Add(($relative.ToLowerInvariant() + '|' + [string]$child.Length + '|' + $hash.ToLowerInvariant()))
     }
     $identityText = 'directory`n' + (($lines.ToArray() | Sort-Object) -join "`n")
+    if ($null -ne $FileHashes) { $FileHashes.Value = $rows.ToArray() }
     return (Get-Sha256Hex -Text $identityText)
 }
 
@@ -637,6 +642,23 @@ function Get-EntryPropertySafe {
     return $null
 }
 
+function Get-MsiProductCode {
+    # Returns the MSI ProductCode WITH braces (e.g. '{0A1B...}', upper-case) when
+    # $Command is an msiexec uninstall/modify string, else $null. Accepts the
+    # standard "MsiExec.exe /X{GUID}", "/X {GUID}", "/I{GUID}", a quoted or
+    # full msiexec path, and lower-case GUIDs. The caller never runs this text;
+    # it only reuses the validated ProductCode.
+    param([string]$Command)
+    if ([string]::IsNullOrWhiteSpace($Command)) { return $null }
+    $m = [regex]::Match($Command, '(?i)msiexec(?:\.exe)?"?\s.*?/[xi]\s*(\{[0-9a-f-]{36}\})')
+    if (-not $m.Success) { return $null }
+    $code = $m.Groups[1].Value.ToUpperInvariant()
+    # Exact GUID shape 8-4-4-4-12 (the character class above alone would also
+    # accept 36 dashes).
+    if ($code -notmatch '^\{[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\}$') { return $null }
+    return $code
+}
+
 function Get-PlanInstanceId {
     param($Instance)
     foreach ($name in @('InstanceId', 'Identifier', 'Key')) {
@@ -825,6 +847,9 @@ function ConvertTo-RegistryProviderPath {
         @{ Prefix = 'HKEY_CURRENT_USER\'; Provider = 'HKCU:\' },
         @{ Prefix = 'HKLM\'; Provider = 'HKLM:\' },
         @{ Prefix = 'HKCU\'; Provider = 'HKCU:\' }
+        @{ Prefix = 'HKEY_USERS\'; Provider = 'Registry::HKEY_USERS\' },
+        @{ Prefix = 'HKU\'; Provider = 'Registry::HKEY_USERS\' },
+        @{ Prefix = 'HKU:\'; Provider = 'Registry::HKEY_USERS\' }
     )
     foreach ($item in $win32Prefixes) {
         if ($p.StartsWith($item.Prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -838,6 +863,9 @@ function Test-AllowedUninstallRegistryPath {
     param([string]$RegistryKeyPath)
     $normalized = ConvertTo-RegistryProviderPath -RegistryKeyPath $RegistryKeyPath
     if ([string]::IsNullOrWhiteSpace($normalized)) { return $false }
+    if ($normalized -match '^Registry::HKEY_USERS\\(S-1-(?:5-21|12-1)-[0-9]+-[0-9]+-[0-9]+-[0-9]+)\\SOFTWARE\\(?:WOW6432Node\\)?Microsoft\\Windows\\CurrentVersion\\Uninstall\\[^\\]+$') {
+        return [bool](Test-Path -LiteralPath ('Registry::HKEY_USERS\' + $Matches[1]))
+    }
     $roots = @(
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
         'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
@@ -866,7 +894,7 @@ function Get-VerifiedUninstallEntry {
     $resolvedKeyPath = ConvertTo-RegistryProviderPath -RegistryKeyPath $RegistryKeyPath
     if (-not (Test-AllowedUninstallRegistryPath -RegistryKeyPath $resolvedKeyPath)) {
         Write-Log "  Plan UninstallRegistryKey rejected: path is outside approved uninstall roots" 'Warn'
-        Add-ManifestEntry -InstanceId $InstanceId -Action 'ValidateUninstallKey' -Target $RegistryKeyPath -Result 'Rejected' -Details 'Registry key is outside approved HKLM/HKCU uninstall roots'
+        Add-ManifestEntry -InstanceId $InstanceId -Action 'ValidateUninstallKey' -Target $RegistryKeyPath -Result 'Rejected' -Details 'Registry key is outside approved machine/current-user/loaded-user uninstall roots'
         return $null
     }
 
@@ -1135,6 +1163,11 @@ function Get-UninstallEntriesForInstance {
         'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
     )
     $matches = New-Object System.Collections.ArrayList
+    foreach ($hive in @(Get-ChildItem -LiteralPath 'Registry::HKEY_USERS' -ErrorAction SilentlyContinue)) {
+        if ($hive.PSChildName -match '^S-1-(?:5-21|12-1)-[0-9]+-[0-9]+-[0-9]+-[0-9]+$') {
+            $roots += 'Registry::HKEY_USERS\' + $hive.PSChildName + '\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+        }
+    }
     foreach ($r in $roots) {
         if (-not (Test-Path -LiteralPath $r)) { continue }
         try {
@@ -1368,23 +1401,21 @@ function Run-VendorUninstaller {
         return $null
     }
 
-    # Check if MSI
-    if ($cmd -match '/x\s+\{([A-F0-9-]{36})\}' -or $cmd -match 'msiexec.*/x\s+(\{[A-F0-9-]{36}\})') {
+    # Check if MSI. The standard form is "MsiExec.exe /X{GUID}" (no space) and
+    # some registrations use /I{GUID} (modify/repair entry point); both resolve
+    # to the same ProductCode, which is always run as "/x {GUID}" below.
+    $productCode = Get-MsiProductCode -Command $cmd
+    if ($productCode) {
         $isMsi = $true
-        $productCode = $matches[1]
         Write-Log "  Detected MSI uninstaller, ProductCode: $productCode"
     }
 
     # Build the actual command line
     $finalCmd = $cmd
     if ($isMsi) {
-        # Ensure quiet uninstall flags
-        if ($finalCmd -notmatch '/qn') {
-            $finalCmd = $finalCmd + ' /qn'
-        }
-        if ($finalCmd -notmatch '/norestart') {
-            $finalCmd = $finalCmd + ' /norestart'
-        }
+        # The command actually run: msiexec.exe with the validated ProductCode
+        # and fixed quiet flags - never the registry text itself.
+        $finalCmd = 'msiexec.exe /x ' + $productCode + ' /qn /norestart'
     } else {
         # For non-MSI, try to add common silent flags if not present
         if ($finalCmd -notmatch '/s' -and $finalCmd -notmatch '/quiet' -and $finalCmd -notmatch '/silent') {
@@ -1416,7 +1447,7 @@ function Run-VendorUninstaller {
             # MSI: run msiexec.exe directly with the validated ProductCode.
             # /qn /norestart are fixed flags we control, not registry text.
             $psi.FileName = "$env:SystemRoot\System32\msiexec.exe"
-            $psi.Arguments = '/x ' + $productCode + ' /qn /norestart'
+            $psi.Arguments = '/x ' + $productCode + ' /qn /norestart'   # $productCode keeps its braces
             $runDirect = $true
         } else {
             # Non-MSI: only run if the executable leaf is an allowlisted,
@@ -1441,11 +1472,14 @@ function Run-VendorUninstaller {
                 Write-Log "  Running vendor uninstaller directly (no shell): $bareExe"
             } else {
                 # Fail-closed: a string we cannot validate is never executed by
-                # shell. Record it and fall back to manual surgery + quarantine.
+                # shell. Nothing was attempted, so this is 'Skipped' (not
+                # 'Failed'): manual surgery + quarantine handle the instance and
+                # its own postconditions decide success. Return $null so the
+                # caller records the fallback decision without a second failure.
                 $psi = $null
                 Write-Log "  REFUSING to run unvalidated UninstallString via cmd.exe (not an allowlisted ScreenConnect/MSI uninstaller). Manual surgery will handle this instance." 'Warn'
-                Add-ManifestEntry -InstanceId $InstanceId -Action 'Uninstall' -Target $displayName -Result 'Failed' -Details "UninstallString not validated (not MSI / not an allowlisted executable under the verified install dir); manual surgery fallback. Raw string (logged, NOT executed): $finalCmd"
-                return $false
+                Add-ManifestEntry -InstanceId $InstanceId -Action 'Uninstall' -Target $displayName -Result 'Skipped' -Details "UninstallString not validated (not MSI / not an allowlisted executable under the verified install dir); manual surgery fallback. Raw string (logged, NOT executed): $finalCmd"
+                return $null
             }
         }
 
@@ -1516,7 +1550,8 @@ function Move-ToQuarantine {
         throw "Refusing to quarantine reparse-point source: $SourcePath"
     }
     $isDirectory = $sourceItem.PSIsContainer
-    $sourceIdentity = Get-PathIdentityHash -Path $SourcePath
+    $sourceHashes = @()
+    $sourceIdentity = Get-PathIdentityHash -Path $SourcePath -FileHashes ([ref]$sourceHashes)
     if (-not $sourceIdentity) { throw "Could not establish source identity: $SourcePath" }
     $hashNote = ''
     $sha256 = ''
@@ -1524,27 +1559,15 @@ function Move-ToQuarantine {
         # A whole-tree move must not carry a junction/symlink across the
         # containment boundary. Fail closed instead of merely skipping it while
         # moving the rest of the tree.
-        $reparseItems = @(Get-ChildItem -LiteralPath $SourcePath -Recurse -Force -Attributes ReparsePoint -ErrorAction Stop)
-        if ($reparseItems.Count -gt 0) {
-            foreach ($rp in $reparseItems) {
-                Add-ManifestEntry -InstanceId $InstanceId -Action 'Quarantine' -Target $rp.FullName -Result 'Failed' -Details 'Reparse point (junction/symlink) blocks whole-tree quarantine'
-            }
-            throw "Refusing to quarantine tree containing $($reparseItems.Count) reparse point(s): $SourcePath"
-        }
+        # Get-PathIdentityHash already rejects all reparse points and collects
+        # these hashes during its single source-tree walk. Reuse that evidence
+        # for the sidecar; destination identity is still verified after moving.
         $safeInstanceFileStem = Get-SafeInstanceFileStem -InstanceId $InstanceId
         $hashCsv = Join-Path $WorkDir ('quarantine-hashes-' + $safeInstanceFileStem + '.csv')
         if (-not (Test-PathContained -Root $WorkDir -Candidate $hashCsv)) {
             throw "Refusing quarantine hash sidecar outside WorkDir: $hashCsv"
         }
-        $rows = New-Object System.Collections.ArrayList
-        foreach ($f in @(Get-ChildItem -LiteralPath $SourcePath -File -Recurse -Force -ErrorAction Stop)) {
-            $h = Get-Sha256File $f.FullName
-            [void]$rows.Add([PSCustomObject]@{
-                Path   = $f.FullName
-                Length = $f.Length
-                SHA256 = $h
-            })
-        }
+        $rows = @($sourceHashes)
         try {
             $rows | Export-Csv -LiteralPath $hashCsv -NoTypeInformation -Encoding UTF8 -ErrorAction Stop
             $hashNote = "directory, " + $rows.Count + " file(s) hashed -> " + $hashCsv
@@ -1553,7 +1576,7 @@ function Move-ToQuarantine {
         }
         $sha256 = $hashNote
     } else {
-        $sha256 = Get-Sha256File $SourcePath
+        $sha256 = $sourceIdentity
     }
     $destName = [System.IO.Path]::GetFileName($SourcePath)
     $instanceDirName = Get-SafeInstanceDirectoryName -InstanceId $InstanceId
@@ -1612,6 +1635,15 @@ function Move-ToQuarantine {
 
             if ($isLocked) {
                 Write-Log "  File in use, scheduling move on reboot via MoveFileEx" 'Warn'
+                # Register the resume task FIRST. MoveFileEx(DELAY_UNTIL_REBOOT)
+                # cannot be cancelled once queued (passing a NULL destination
+                # deletes the file at reboot instead), so the move is only queued
+                # when the resume action that finishes the job already exists.
+                $resumeAlreadyDeferred = ($script:DeferredQuarantineInstanceIds -contains $InstanceId)
+                if (-not (Set-RunOnceResume -InstanceId $InstanceId -WorkDir $WorkDir)) {
+                    Write-Log "  Reboot-resume task could not be registered; NOT queuing the move-on-reboot. $SourcePath stays where it is." 'Error'
+                    throw 'Could not register an elevated reboot-resume action; no move was queued'
+                }
                 # Use MoveFileEx with MOVEFILE_DELAY_UNTIL_REBOOT
                 $kernelType = 'Win32.Kernel32' -as [type]
                 if (-not $kernelType) {
@@ -1624,20 +1656,10 @@ function Move-ToQuarantine {
                 $result = $kernelType::MoveFileEx($SourcePath, $destPath, $MOVEFILE_DELAY_UNTIL_REBOOT)
                 if (-not $result) {
                     $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+                    # Nothing was queued; drop the resume task we just made unless
+                    # an earlier deferred move for this instance still needs it.
+                    if (-not $resumeAlreadyDeferred) { Remove-ResumeTask -InstanceId $InstanceId }
                     throw "MoveFileEx failed with error $err"
-                }
-                # Set RunOnce to resume; inability to register a resume path is
-                # a safety failure, not a warning that can be ignored.
-                if (-not (Set-RunOnceResume -InstanceId $InstanceId -WorkDir $WorkDir)) {
-                    # Cancel the already-queued delayed move before returning
-                    # failure; otherwise Windows may still move the payload at
-                    # reboot without any resume cleanup attached.
-                    $cancelled = $kernelType::MoveFileEx($SourcePath, $null, $MOVEFILE_DELAY_UNTIL_REBOOT)
-                    if (-not $cancelled) {
-                        $cancelError = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
-                        throw "Could not register reboot-resume action and could not cancel pending MoveFileEx (error $cancelError)"
-                    }
-                    throw 'Could not register an elevated reboot-resume action; pending move cancelled'
                 }
                 if (-not ($script:DeferredQuarantineInstanceIds -contains $InstanceId)) {
                     [void]$script:DeferredQuarantineInstanceIds.Add($InstanceId)
@@ -1711,8 +1733,40 @@ function Remove-ResumeTask {
 # -----------------------------------------------------------------------------
 # Persistence cleanup (scheduled tasks, Run keys, WMI subscriptions)
 # -----------------------------------------------------------------------------
+function Open-RunKeyForCleanup {
+    # Opens 'HKLM:\...' / 'HKCU:\...' as a Microsoft.Win32.RegistryKey in the
+    # default view (the one the PowerShell registry provider uses in this
+    # process). Returns $null when the key does not exist. Throws for any
+    # other hive so an unexpected path is reported, never guessed.
+    param([Parameter(Mandatory = $true)][string]$Path, [bool]$Writable)
+    $hive = $null
+    $subKey = $null
+    if ($Path -match '^(?i)HKLM:\\(.+)$') { $hive = [Microsoft.Win32.RegistryHive]::LocalMachine; $subKey = $Matches[1] }
+    elseif ($Path -match '^(?i)HKCU:\\(.+)$') { $hive = [Microsoft.Win32.RegistryHive]::CurrentUser; $subKey = $Matches[1] }
+    else { throw "Unsupported Run key path: $Path" }
+    $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey($hive, [Microsoft.Win32.RegistryView]::Default)
+    try {
+        return $baseKey.OpenSubKey($subKey, $Writable)
+    } finally {
+        $baseKey.Close()
+    }
+}
+
 function Clean-Persistence {
-    param([string]$InstallDir, [string]$InstanceId)
+    # -RunKeys exists so tests can point the Run-key sweep at a throwaway key;
+    # production callers always use the default list.
+    param(
+        [string]$InstallDir,
+        [string]$InstanceId,
+        [string[]]$RunKeys = @(
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
+            'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
+            'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run',
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce'
+        )
+    )
     $InstallDir = Expand-Env $InstallDir
     $cleaned = 0
     $failed = $false
@@ -1733,7 +1787,26 @@ function Clean-Persistence {
                         $args = Get-EntryPropertySafe -Instance $action -PropertyName 'Arguments'
                         if ($path) { $path = Expand-Env ([string]$path) }
                         if ($args) { $args = Expand-Env ([string]$args) }
-                        $pathReferences = $path -and (Test-PathContained -Root $InstallDir -Candidate $path)
+                        # String-only match, like the Run-key branch: by the
+                        # time persistence is cleaned the install folder has
+                        # usually been quarantined, and Test-PathContained
+                        # returns false for a root that no longer exists, so
+                        # a task launching the ScreenConnect exe survived.
+                        # Execute is a single path, so it is normalised
+                        # lexically (GetFullPath does not touch the disk; '..'
+                        # cannot walk a match out of the folder) and must sit
+                        # under the install folder itself, not a sibling that
+                        # merely shares its name as a prefix.
+                        $pathReferences = $false
+                        if ($path) {
+                            try {
+                                $execFull = [System.IO.Path]::GetFullPath(([string]$path).Trim().Trim('"'))
+                                $dirFull = [System.IO.Path]::GetFullPath(([string]$InstallDir).Trim().Trim('"')).TrimEnd([char[]]@([char]92, [char]47))
+                                $pathReferences = $execFull.StartsWith($dirFull + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
+                            } catch {
+                                $pathReferences = $false
+                            }
+                        }
                         $argsReferences = $args -and (Test-LiteralPathReference -Text $args -Path $InstallDir)
                         if ($pathReferences -or $argsReferences) {
                             $taskName = $task.TaskName
@@ -1765,35 +1838,38 @@ function Clean-Persistence {
     }
 
     # 2. Registry Run/RunOnce keys
-    $runKeys = @(
-        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
-        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
-        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
-        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
-        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run',
-        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce'
-    )
-    foreach ($rk in $runKeys) {
-        if (-not (Test-Path -LiteralPath $rk)) { continue }
+    # Read and delete through Microsoft.Win32.RegistryKey, never through
+    # Get-ItemProperty/Remove-ItemProperty -Name: the provider treats a value
+    # name as a wildcard, so a value literally named '*' (or '[a]x') would
+    # delete every value in the Run key. RegistryKey.DeleteValue takes the
+    # name literally. RegistryView.Default is the view the registry provider
+    # uses in this process, and the WOW6432Node paths are listed explicitly,
+    # so the keys reached are the same as before.
+    foreach ($rk in @($RunKeys)) {
+        $regKey = $null
         try {
-            $vals = Get-ItemProperty -LiteralPath $rk -ErrorAction SilentlyContinue
-            if ($vals) {
-                foreach ($prop in $vals.PSObject.Properties) {
-                    if ($prop.Name -eq 'PSPath' -or $prop.Name -eq 'PSParentPath' -or $prop.Name -eq 'PSChildName' -or $prop.Name -eq 'PSDrive' -or $prop.Name -eq 'PSProvider') { continue }
-                    $val = $prop.Value
-                    $expandedVal = if ($val) { Expand-Env ([string]$val) } else { $val }
-                    if ($expandedVal -and (Test-LiteralPathReference -Text ([string]$expandedVal) -Path $InstallDir)) {
-                        Write-Log "  Found Run key referencing install dir: $rk\$($prop.Name) = $val"
-                        if ($Execute) {
-                            Remove-ItemProperty -LiteralPath $rk -Name $prop.Name -Force -ErrorAction Stop
-                            Write-Log "    Deleted Run key value: $prop.Name"
-                            Add-ManifestEntry -InstanceId $InstanceId -Action 'DeleteRunKey' -Target "$rk\$($prop.Name)" -Result 'Success' -Details "Referenced $InstallDir"
-                            $cleaned++
-                        } else {
-                            Write-Log "    [DRY-RUN] Would delete Run key value: $prop.Name"
-                            Add-ManifestEntry -InstanceId $InstanceId -Action 'DeleteRunKey' -Target "$rk\$($prop.Name)" -Result 'DryRun' -Details "Referenced $InstallDir"
-                            $cleaned++
+            $regKey = Open-RunKeyForCleanup -Path $rk -Writable ([bool]$Execute)
+            if ($null -eq $regKey) { continue }
+            foreach ($valueName in @($regKey.GetValueNames())) {
+                $shownName = if ([string]::IsNullOrEmpty($valueName)) { '(default)' } else { $valueName }
+                $val = $regKey.GetValue($valueName)
+                $expandedVal = if ($val) { Expand-Env ([string]$val) } else { $val }
+                if ($expandedVal -and (Test-LiteralPathReference -Text ([string]$expandedVal) -Path $InstallDir)) {
+                    Write-Log "  Found Run key referencing install dir: $rk\$shownName = $val"
+                    if ($Execute) {
+                        $regKey.DeleteValue($valueName, $true)
+                        Write-Log "    Deleted Run key value: $shownName"
+                        $manifestKey = $rk
+                        if ($rk -match '^HKCU:') {
+                            $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+                            $manifestKey = $rk -replace '^HKCU:', ('HKEY_USERS\' + $sid)
                         }
+                        Add-ManifestEntry -InstanceId $InstanceId -Action 'DeleteRunKey' -Target "$manifestKey\$shownName" -Result 'Success' -Details "Referenced $InstallDir"
+                        $cleaned++
+                    } else {
+                        Write-Log "    [DRY-RUN] Would delete Run key value: $shownName"
+                        Add-ManifestEntry -InstanceId $InstanceId -Action 'DeleteRunKey' -Target "$rk\$shownName" -Result 'DryRun' -Details "Referenced $InstallDir"
+                        $cleaned++
                     }
                 }
             }
@@ -1801,6 +1877,8 @@ function Clean-Persistence {
             $failed = $true
             Write-Log ("  Failed to delete Run key value: " + $_.Exception.Message) 'Error'
             Add-ManifestEntry -InstanceId $InstanceId -Action 'DeleteRunKey' -Target 'N/A' -Result 'Failed' -Details $_.Exception.Message
+        } finally {
+            if ($null -ne $regKey) { $regKey.Close() }
         }
     }
 
@@ -1892,6 +1970,10 @@ foreach ($inst in $scInstancesArray) {
                 Write-Log "  PRODUCT VERIFICATION FAILED for ${instanceId}: $why" 'Error'
                 Add-ManifestEntry -InstanceId $instanceId -Action 'ProductVerification' -Target 'N/A' -Result 'PRODUCT_VERIFICATION_FAILED' -Details "Entry skipped, never uninstalled. Reasons: $why"
                 Update-ResumeStatus -InstanceId $instanceId -Status 'PRODUCT_VERIFICATION_FAILED'
+                # An instance the plan asked to remove was left in place: the
+                # run did NOT do what was approved, so it must not exit 0 (the
+                # wrapper would otherwise print "Removal completed").
+                $overallSuccess = $false
                 continue
             }
             Write-Log "  Product verification passed"
@@ -2039,7 +2121,8 @@ foreach ($inst in $scInstancesArray) {
                 $uninstallSucceeded = $true
                 Write-Log "  Vendor uninstaller reported success"
             } elseif ($null -eq $uninstallResult) {
-                # Nothing was attempted (no uninstall string / no entry); the
+                # Nothing was attempted (no uninstall string / no entry / an
+                # uninstall string that failed validation and was refused); the
                 # truthful Skipped entry is already in the manifest. Record the
                 # DECISION here with a real target, never an empty one, and
                 # never as 'Failed' - a run whose manual surgery succeeds must
@@ -2050,7 +2133,7 @@ foreach ($inst in $scInstancesArray) {
                 Add-ManifestEntry -InstanceId $instanceId -Action 'UninstallFallback' -Target $fallbackTarget -Result 'Planned' -Details 'No vendor uninstaller available; proceeding with manual surgery + quarantine'
             } else {
                 # Genuine failure - the reason entry (exit code / timeout /
-                # validation refusal) is already recorded. Record the decision
+                # exception) is already recorded. Record the decision
                 # with a real target.
                 Write-Log "  Vendor uninstaller failed - proceeding with manual surgery" 'Warn'
                 $fallbackTarget = Get-EntryPropertySafe -Instance $uninstallEntry -PropertyName 'DisplayName'
@@ -2104,8 +2187,10 @@ foreach ($inst in $scInstancesArray) {
                 $orphanPath = [string](Get-EntryPropertySafe -Instance $uninstallEntry -PropertyName 'PSPath')
                 if ($orphanPath) {
                     $regPath = $orphanPath -replace '^Microsoft\.PowerShell\.Core\\Registry::', ''
+                    $regPath = $regPath -replace '^Registry::', ''
                     $regPath = $regPath -replace '^HKEY_LOCAL_MACHINE', 'HKLM'
                     $regPath = $regPath -replace '^HKEY_CURRENT_USER', 'HKCU'
+                    $regPath = $regPath -replace '^HKEY_USERS', 'HKU'
                     $safeInstanceFileStem = Get-SafeInstanceFileStem -InstanceId $instanceId
                     $backup = Join-Path $WorkDir ('uninstall-key-' + $safeInstanceFileStem + '.reg')
                     if (-not (Test-PathContained -Root $WorkDir -Candidate $backup)) {
@@ -2390,6 +2475,11 @@ Write-Log "Manifest: $manifestPath"
 
 if ($failedCount -gt 0) {
     Write-Log "WARNING: Some actions failed. Check manifest for details." 'Warn'
+    $overallSuccess = $false
+}
+
+if ($verifFailCount -gt 0) {
+    Write-Log "WARNING: $verifFailCount instance(s) could not be verified as ScreenConnect and were NOT removed." 'Warn'
     $overallSuccess = $false
 }
 

@@ -95,7 +95,7 @@ $xamlText = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'MainWindow.xaml'))
 $win = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader ([xml]$xamlText)))
 $ui = @{}
 $controlNames = 'TitleText', 'InfoText', 'RunText', 'BtnOpenRitRoot','StepperHost', 'StartPanel',
-'RbOffline', 'RbOnline', 'RbDetect', 'RbStage', 'BtnStart', 'PriorRunsText',
+'RbOffline', 'RbOnline', 'RbDetect', 'RbStage', 'SharePanel', 'CbShare', 'BtnStart', 'PriorRunsText',
 'RunPanel', 'StatusTitle', 'StatusDetail', 'Busy', 'Banner', 'BannerText', 'ReviewBar', 'ReviewSummary', 'BtnReviewContinue',
 'CardsHost', 'BtnOpenReport', 'BtnOpenRun', 'BtnRestart', 'BtnNewRun', 'BtnCopy', 'BtnOpenLog', 'ConsoleBox',
 'RowConsole', 'ColStepper', 'LinkRubinIt', 'LinkPupontech', 'RootGrid', 'HeaderCard', 'StatusCard'
@@ -125,6 +125,10 @@ $script:DlgChecks = @{}
 $script:DlgText = $null
 $script:ConsoleSaved = Set-GuiConsoleEncoding
 $script:ShareUrl = ''
+# The share step printed "MICROBIN UPLOAD: skipped; ..." (ticked, but no server configured): its reason.
+$script:ShareSkipped = ''
+# Characters in the console pane, counted as they are appended (reading .Text copies the whole pane).
+$script:ConsoleChars = 0
 $script:SessionWriteWarned = $false
 # The modes the window offers and their labels come from gui\steps.json ("Window": true), the one list.
 # The core also knows 'Full' (START-HERE.bat with no flag), but in the window it would only repeat
@@ -205,7 +209,13 @@ function Add-ConsoleLines {
     if (@($Lines).Count -eq 0) { return }
     $text = (@($Lines) -join "`r`n") + "`r`n"
     $ui.ConsoleBox.AppendText($text)
-    if ($ui.ConsoleBox.Text.Length -gt 400000) { $ui.ConsoleBox.Text = $ui.ConsoleBox.Text.Substring(200000) }
+    # The length is counted here, not read from .Text: .Text builds a copy of the whole pane on every read.
+    $script:ConsoleChars += $text.Length
+    if ($script:ConsoleChars -gt 400000) {
+        # Cap the pane: keep the newest half. The full output is in gui-console.log.
+        $ui.ConsoleBox.Text = $ui.ConsoleBox.Text.Substring(200000)
+        $script:ConsoleChars = $ui.ConsoleBox.Text.Length
+    }
     $ui.ConsoleBox.ScrollToEnd()
     Write-GuiLogText ((@($Lines)) -join "`r`n")
 }
@@ -242,7 +252,8 @@ function Initialize-Stepper {
         $id = [string]$step.Id
         if ($seen.ContainsKey($id)) { continue }
         $seen[$id] = $true
-        $e = [pscustomobject]@{ StepId = $id; StepTitle = [string]$step.Title }
+        # A step the mode runs shows its plan title (the share step reads differently when sharing is unticked).
+        $e = $(if ($inMode.ContainsKey($id)) { $inMode[$id] } else { [pscustomobject]@{ StepId = $id; StepTitle = [string]$step.Title } })
         $outside = -not $inMode.ContainsKey($id)
         # A row: a status dot, the step number and title, and the state underneath. Rounded, borderless
         # until the step is the one running or waiting, which gets an outline in its state colour.
@@ -780,12 +791,18 @@ function Set-PreviewMode {
 function Start-Run {
     param([string]$ModeName)
     $script:Finished = $false
-    $sess = New-GuiSession -Mode $ModeName -ToolRoot $ToolRoot -RitRoot $RitRoot -Interactive
+    # A second run in the same window must never show the previous run's paste link.
+    $script:ShareUrl = ''; $script:ShareSkipped = ''
+    # The share tick box (Online only, ticked by default). Test hook: a canned "ShareReport" answer stands in for it.
+    $share = [bool]$ui.CbShare.IsChecked
+    $ta = Get-TestAnswer 'ShareReport'
+    if ($null -ne $ta) { $share = [bool]$ta }
+    $sess = New-GuiSession -Mode $ModeName -ToolRoot $ToolRoot -RitRoot $RitRoot -Interactive -Answers @{ ShareReport = $share }
     $prior = $null
     if ($ModeName -eq 'Online') {
         $prior = Find-GuiPriorRun -Session $sess
         if ($prior) {
-            $r = Show-Dialog -Id 'ContinuePrior' -Title 'Continue the offline run?' -Message ('A finished offline-half run was found for this PC:' + "`r`n" + $prior.RunRoot + "`r`n`r`nContinue that run? Its report is shared at the end. Otherwise a scanner-only run starts and nothing is shared.") -Buttons @(
+            $r = Show-Dialog -Id 'ContinuePrior' -Title 'Continue the offline run?' -Message ('A finished offline-half run was found for this PC:' + "`r`n" + $prior.RunRoot + "`r`n`r`nContinue that run? " + $(if ($share) { 'Its report is shared at the end.' } else { 'Its report is updated on this PC but not shared (the share box is unticked).' }) + " Otherwise a scanner-only run starts and nothing is shared.") -Buttons @(
                 @{ Text = 'Continue that run'; Value = 'continue' }, @{ Text = 'Start a scanner-only run'; Value = 'new' })
             if ($r -and $r.Value -eq 'new') { $prior = $null }
         }
@@ -809,6 +826,7 @@ function Start-Run {
         $script:LogPath = Join-Path $logs 'gui-console.log'
     }
     $ui.ConsoleBox.Clear()
+    $script:ConsoleChars = 0
     $ui.CardsHost.Children.Clear()
     $ui.Banner.Visibility = 'Collapsed'
     $ui.ReviewBar.Visibility = 'Collapsed'
@@ -998,7 +1016,9 @@ function Show-RunSummary {
         $s = $res[$sid]
         if (-not $s) { Add-SummaryLine 'Report share' 'not reached' 'WarningFg'; continue }
         if ($s.Status -eq 'Skipped') { Add-SummaryLine 'Report share' ('not shared - ' + $s.Message) 'Muted' }
+        elseif ($sid -eq '9o' -and $s.Status -eq 'Done' -and -not [bool]$Sess.Answers['ShareReport']) { Add-SummaryLine 'Report share' 'not shared - you unticked sharing. The report and connectwise-report.zip are on this PC only.' 'Muted' }
         elseif ($s.Status -ne 'Done') { Add-SummaryLine 'Report share' ('failed - ' + $s.Message + ' The local report is kept.') 'DangerFg' }
+        elseif ($sid -eq '9o' -and $script:ShareSkipped) { Add-SummaryLine 'Report share' ('NOT shared - ' + $script:ShareSkipped + ' (microbin-url.txt beside the tool is empty). The report and connectwise-report.zip are on this PC only.') 'WarningFg' }
         elseif ($script:ShareUrl) { Add-SummaryLine 'Report shared - paste link' $script:ShareUrl -Selectable }
         elseif ($Sess.Phase -eq 'OFFLINE') { Add-SummaryLine 'Report' 'package built on this PC, not uploaded (the Online half shares it)' 'Muted' }
         else { Add-SummaryLine 'Report share' 'done (no paste link was printed)' 'Muted' }
@@ -1025,6 +1045,8 @@ function Write-ResultFile {
             StartPanelVisible = ($ui.StartPanel.Visibility -eq 'Visible'); RunPanelVisible = ($ui.RunPanel.Visibility -eq 'Visible')
             KeepIdentifiers = @($script:Session.Answers['KeepIdentifiers'])
             ShareUrl = $script:ShareUrl
+            ShareSkipped = $script:ShareSkipped
+            ShareReport = [bool]$script:Session.Answers['ShareReport']
             # A TextBlock built from Runs (bold label + value) reports no .Text, so read its Runs.
             CardTexts = @($ui.CardsHost.Children | ForEach-Object {
                     if ($_ -is [System.Windows.Controls.TextBlock]) { $(if ($_.Inlines.Count -gt 0) { (@($_.Inlines | ForEach-Object { if ($_ -is [System.Windows.Documents.Run]) { $_.Text } }) -join '') } else { $_.Text }) }
@@ -1057,6 +1079,8 @@ function Invoke-Tick {
         if ($script:Action -and ($script:Action.StepId -eq '9b' -or $script:Action.StepId -eq '9o')) {
             $url = Get-GuiShareUrl $u.Lines
             if ($url) { $script:ShareUrl = $url }
+            $skip = Get-GuiShareSkipped $u.Lines
+            if ($skip) { $script:ShareSkipped = $skip }
         }
     }
     if ($u.Exited) {
@@ -1076,6 +1100,8 @@ function Invoke-Tick {
             }
         }
         $o = Complete-GuiAction -Session $script:Session -Action $a -ExitCode ([int]$u.ExitCode)
+        # Ticked, but the uploader had no server to send to: the run is not "shared".
+        if ($a.StepId -eq '9o' -and $script:ShareSkipped) { $script:Session.Shared = $false }
         $script:Child = $null
         $script:Action = $null
         Add-ConsoleNote ('Step ' + $o.StepId + ' ended with exit code ' + $o.ExitCode + ' (' + $o.Status + ')' + $(if ($o.Message) { ': ' + $o.Message } else { '' }))
@@ -1150,7 +1176,12 @@ if ($SelfTest) {
 $ui.TitleText.Text = 'ScreenConnect Cleanup  v' + $script:Version
 $ui.RbOffline.Tag = 'Offline'; $ui.RbOnline.Tag = 'Online'; $ui.RbDetect.Tag = 'Detect'; $ui.RbStage.Tag = 'Stage'
 foreach ($rb in $ui.RbOffline, $ui.RbOnline, $ui.RbDetect, $ui.RbStage) {
-    $rb.add_Checked({ param($s, $e) if (-not $script:Session -or $script:Finished) { Set-PreviewMode ([string]$s.Tag) } })
+    $rb.add_Checked({
+            param($s, $e)
+            if (-not $script:Session -or $script:Finished) { Set-PreviewMode ([string]$s.Tag) }
+            # The share tick box belongs to the Online half only.
+            $ui.SharePanel.Visibility = $(if ([string]$s.Tag -eq 'Online') { 'Visible' } else { 'Collapsed' })
+        })
 }
 Set-PreviewMode 'Offline'
 Update-HeaderButtons
@@ -1166,6 +1197,7 @@ $ui.BtnStart.add_Click({ Start-Run (Get-SelectedMode) })
 $ui.BtnReviewContinue.add_Click({ Complete-Review })
 $ui.BtnNewRun.add_Click({
         $script:Session = $null; $script:Action = $null; $script:Child = $null; $script:LogPath = ''; $script:Finished = $false
+        $script:ShareUrl = ''; $script:ShareSkipped = ''
         $ui.RunText.Text = 'Run folder: none yet'
         Set-PreviewMode (Get-SelectedMode); Update-HeaderButtons; Show-Panel 'Start'
     })
@@ -1193,24 +1225,33 @@ $timer.add_Tick({
 
 $win.add_Closing({
         param($s, $e)
-        if ($script:Child -and -not $script:Child.Finished) {
-            if ($script:CloseLock) {
-                [void][System.Windows.MessageBox]::Show('Removal or an uninstall is in progress. Closing now can leave the PC half cleaned. Wait for this step to finish.', 'ScreenConnect Cleanup', 'OK', 'Warning')
-                $e.Cancel = $true
-                return
+        # A message box pumps messages, so the 250 ms timer would keep ticking under it: a step could end,
+        # the next one start and its prompt dialogs open behind this box. Pause the timer while the box is
+        # up and start it again only when the close is cancelled.
+        $timerWasOn = $timer.IsEnabled
+        $timer.Stop()
+        try {
+            if ($script:Child -and -not $script:Child.Finished) {
+                if ($script:CloseLock) {
+                    [void][System.Windows.MessageBox]::Show('Removal or an uninstall is in progress. Closing now can leave the PC half cleaned. Wait for this step to finish.', 'ScreenConnect Cleanup', 'OK', 'Warning')
+                    $e.Cancel = $true
+                    return
+                }
+                # A scanner the technician is driving is left open when the window closes (design 7):
+                # only the step's own powershell.exe is ended, never the scanner it started.
+                $isScanner = ($script:Action -and @('6a', '6b', '6c') -contains $script:Action.StepId)
+                if (-not $script:AutoStart) {
+                    $q = $(if ($isScanner) { 'A scanner is still open. Close this window? The scanner window stays open; finish or close it yourself.' } else { 'A step is still running. Stop it and close? (Nothing has been approved for removal in this step yet.)' })
+                    $ans = [System.Windows.MessageBox]::Show($q, 'ScreenConnect Cleanup', 'YesNo', 'Question')
+                    if ($ans -ne 'Yes') { $e.Cancel = $true; return }
+                }
+                if ($isScanner) { Stop-GuiChild $script:Child -KeepDescendants } else { Stop-GuiChild $script:Child }
+            } elseif ($script:Action -and $script:Action.Kind -eq 'Ask' -and -not $script:AutoStart) {
+                $ans = [System.Windows.MessageBox]::Show('The run is waiting for your choice. Close the window? Nothing has been changed by this step yet.', 'ScreenConnect Cleanup', 'YesNo', 'Question')
+                if ($ans -ne 'Yes') { $e.Cancel = $true }
             }
-            # A scanner the technician is driving is left open when the window closes (design 7):
-            # only the step's own powershell.exe is ended, never the scanner it started.
-            $isScanner = ($script:Action -and @('6a', '6b', '6c') -contains $script:Action.StepId)
-            if (-not $script:AutoStart) {
-                $q = $(if ($isScanner) { 'A scanner is still open. Close this window? The scanner window stays open; finish or close it yourself.' } else { 'A step is still running. Stop it and close? (Nothing has been approved for removal in this step yet.)' })
-                $ans = [System.Windows.MessageBox]::Show($q, 'ScreenConnect Cleanup', 'YesNo', 'Question')
-                if ($ans -ne 'Yes') { $e.Cancel = $true; return }
-            }
-            if ($isScanner) { Stop-GuiChild $script:Child -KeepDescendants } else { Stop-GuiChild $script:Child }
-        } elseif ($script:Action -and $script:Action.Kind -eq 'Ask' -and -not $script:AutoStart) {
-            $ans = [System.Windows.MessageBox]::Show('The run is waiting for your choice. Close the window? Nothing has been changed by this step yet.', 'ScreenConnect Cleanup', 'YesNo', 'Question')
-            if ($ans -ne 'Yes') { $e.Cancel = $true }
+        } finally {
+            if ($timerWasOn -and $e.Cancel) { $timer.Start() }
         }
     })
 

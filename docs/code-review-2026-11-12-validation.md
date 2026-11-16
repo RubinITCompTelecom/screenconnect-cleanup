@@ -3,6 +3,10 @@
 Date: 2026-11-15. Branch: `fix/code-review-2026-11-12`.
 Implementation through commit `d8c7b67`. No push or PR was made.
 
+Historical validation before the follow-up regression audit. See
+[regression repairs and current validation](regression-repairs-2026-11-16.md)
+for the later fixes and their results.
+
 ## Scope
 
 The numbered findings 1-24 in the Desktop review are implemented, along with

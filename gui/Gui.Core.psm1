@@ -292,9 +292,24 @@ function Resolve-GuiListToken {
         'PowerArg'   { $f = $Session.RunRoot + '/power-options-repair.json';  if (Test-Path -LiteralPath $f -PathType Leaf) { return @('-PowerOptionsRepair', $f) }; return @() }
         'PowerArgBs' { $f = $Session.RunRoot + '\power-options-repair.json'; if (Test-Path -LiteralPath $f -PathType Leaf) { return @('-PowerOptionsRepair', $f) }; return @() }
         'ScannerArgs' {
-            $f = $Session.RunRoot + '\logs\scanner-Malwarebytes-result.json'
+            $f = $Session.RunRoot + '\scanner_results.json'
             if (Test-Path -LiteralPath $f -PathType Leaf) { return @('-ScannerSummary', $f) }
-            return @('-ScannersSkipped')
+            return @() # missing evidence is unknown, not proof that every scan was skipped
+        }
+        'ScannerStateArgs' {
+            $out = @()
+            foreach ($pair in @(@('6a','-KvrtState'),@('6b','-EsetState'),@('6c','-MalwarebytesState'))) {
+                $r = @($Session.Results | Where-Object { $_.StepId -eq $pair[0] } | Select-Object -Last 1)
+                $state = 'NotRun'
+                if ($r.Count) {
+                    if ($r[0].Status -eq 'Skipped') {
+                        $state = 'Skipped'
+                        if ($r[0].Message -match 'not staged') { $state = 'NotStaged' }
+                    } else { $state = 'Exit:' + [int]$r[0].ExitCode }
+                }
+                $out += @($pair[1], $state)
+            }
+            return $out
         }
         'GpoArgs' { if ([bool]$Session.Answers['ResetGpo']) { return @('-ResetLocalGpo') }; return @() }
         'ReportArg' {
@@ -815,7 +830,7 @@ function Test-GuiQuestionLike {
     $t = ([string]$Text).Trim()
     if ($t -eq '') { return $false }
     if ($t -match '^\[snapshot\s+[^\]]+\]\s+\d+/\d+\s+sections,\s+\d+s elapsed$') { return $false }
-    if ($t -match '^\d+(?:\.\d+)?%$' -or $t -match '^Collecting [\w ]+\.\.\.$') { return $false }
+    if ($t -match '^\d+(?:\.\d+)?%$' -or $t -eq 'Collecting processes...') { return $false }
     return $true
 }
 

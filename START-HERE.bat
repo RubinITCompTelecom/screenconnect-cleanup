@@ -53,6 +53,9 @@ rem ---- Phase selection (offline / online split) ------------------------------
 rem No phase flag = the full pipeline exactly as before. The flags are plain
 rem arguments (not environment variables) so they survive the UAC relaunch below.
 set "SCC_PHASE=ALL"
+set "SCC_KVRT_STATE=NotRun"
+set "SCC_ESET_STATE=NotRun"
+set "SCC_MB_STATE=NotRun"
 set "SCC_PHASE_ARG="
 set "SCC_ELEV_ATTEMPTED=0"
 set "SCC_SELECT=0"
@@ -316,12 +319,16 @@ echo.
 if /i "!SCC_PHASE!"=="ONLINE" echo    -- 2a: KVRT --
 if /i not "!SCC_PHASE!"=="ONLINE" echo    -- 6a: KVRT --
 set /p GO="    Launch KVRT? [Y/n] "
+set "SCC_KVRT_STATE=Skipped"
 if /i not "%GO%"=="n" (
     if exist "!SCC_DP0!tools\AV\KVRT.exe" (
-        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Invoke-GUIScanner.ps1" -Scanner KVRT
+        if not exist "!SCC_RUN_ROOT!\logs" mkdir "!SCC_RUN_ROOT!\logs"
+        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Invoke-GUIScanner.ps1" -Scanner KVRT -ResultPath "!SCC_RUN_ROOT!\logs\scanner-KVRT-result.json"
+        set "SCC_KVRT_STATE=Exit:!errorlevel!"
         if errorlevel 1 echo        [WARN] KVRT launch failed with errorlevel !errorlevel! - see the message above
     ) else (
         echo        [WARN] tools\AV\KVRT.exe not staged - run step 1 first.
+        set "SCC_KVRT_STATE=NotStaged"
     )
 )
 set GO=
@@ -330,12 +337,16 @@ echo.
 if /i "!SCC_PHASE!"=="ONLINE" echo    -- 2b: ESET Online Scanner --
 if /i not "!SCC_PHASE!"=="ONLINE" echo    -- 6b: ESET Online Scanner --
 set /p GO="    Launch ESET Online Scanner? [Y/n] "
+set "SCC_ESET_STATE=Skipped"
 if /i not "%GO%"=="n" (
     if exist "!SCC_DP0!tools\AV\esetonlinescanner.exe" (
-        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Invoke-GUIScanner.ps1" -Scanner ESET
+        if not exist "!SCC_RUN_ROOT!\logs" mkdir "!SCC_RUN_ROOT!\logs"
+        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Invoke-GUIScanner.ps1" -Scanner ESET -ResultPath "!SCC_RUN_ROOT!\logs\scanner-ESET-result.json"
+        set "SCC_ESET_STATE=Exit:!errorlevel!"
         if errorlevel 1 echo        [WARN] ESET launch failed with errorlevel !errorlevel! - see the message above
     ) else (
         echo        [WARN] tools\AV\esetonlinescanner.exe not staged - run step 1 first.
+        set "SCC_ESET_STATE=NotStaged"
     )
 )
 set GO=
@@ -345,9 +356,11 @@ echo.
 if /i "!SCC_PHASE!"=="ONLINE" echo    -- 2c: Malwarebytes --
 if /i not "!SCC_PHASE!"=="ONLINE" echo    -- 6c: Malwarebytes --
 set /p GO="    Install and launch Malwarebytes now? [Y/n] "
+set "SCC_MB_STATE=Skipped"
 if /i "%GO%"=="n" goto :skip_6c
 if not exist "!SCC_RUN_ROOT!\logs" mkdir "!SCC_RUN_ROOT!\logs"
 powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Invoke-GUIScanner.ps1" -Scanner Malwarebytes -ResultPath "!SCC_RUN_ROOT!\logs\scanner-Malwarebytes-result.json"
+set "SCC_MB_STATE=Exit:!errorlevel!"
 if errorlevel 1 echo        [WARN] Malwarebytes wrapper exited with errorlevel !errorlevel! - see the result JSON and message above
 echo        Malwarebytes session ended - continuing.
 :skip_6c
@@ -476,8 +489,9 @@ rem instead of showing "Unknown / incomplete". Scanner status: the Malwarebytes 
 rem (the report makes no malware claim either way).
 set "SCC_POWER_ARG="
 if exist "!SCC_RUN_ROOT!/power-options-repair.json" set "SCC_POWER_ARG=-PowerOptionsRepair "!SCC_RUN_ROOT!/power-options-repair.json""
-set "SCC_SCAN_ARG=-ScannersSkipped"
-if exist "!SCC_RUN_ROOT!\logs\scanner-Malwarebytes-result.json" set "SCC_SCAN_ARG=-ScannerSummary "!SCC_RUN_ROOT!\logs\scanner-Malwarebytes-result.json""
+powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Write-ScannerSummary.ps1" -WorkDir "!SCC_RUN_ROOT!" -KvrtState !SCC_KVRT_STATE! -EsetState !SCC_ESET_STATE! -MalwarebytesState !SCC_MB_STATE!
+set "SCC_SCAN_ARG="
+if exist "!SCC_RUN_ROOT!\scanner_results.json" set "SCC_SCAN_ARG=-ScannerSummary "!SCC_RUN_ROOT!\scanner_results.json""
 if not defined FINDINGS_JSON (
     echo     [WARN] No current-run findings.json available - skipping report.
 ) else (
@@ -681,8 +695,9 @@ if exist "!SCC_RUN_ROOT!\kept-instances.json" set "SCC_OR_ARGS=!SCC_OR_ARGS! -Ke
 set "SCC_AS=!SCC_RUN_ROOT!\after-scans\persistence"
 set "SCC_POWER_ARG="
 if exist "!SCC_RUN_ROOT!\power-options-repair.json" set "SCC_POWER_ARG=-PowerOptionsRepair "!SCC_RUN_ROOT!\power-options-repair.json""
-set "SCC_SCAN_ARG=-ScannersSkipped"
-if exist "!SCC_RUN_ROOT!\logs\scanner-Malwarebytes-result.json" set "SCC_SCAN_ARG=-ScannerSummary "!SCC_RUN_ROOT!\logs\scanner-Malwarebytes-result.json""
+powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Write-ScannerSummary.ps1" -WorkDir "!SCC_RUN_ROOT!" -KvrtState !SCC_KVRT_STATE! -EsetState !SCC_ESET_STATE! -MalwarebytesState !SCC_MB_STATE!
+set "SCC_SCAN_ARG="
+if exist "!SCC_RUN_ROOT!\scanner_results.json" set "SCC_SCAN_ARG=-ScannerSummary "!SCC_RUN_ROOT!\scanner_results.json""
 echo     [i] Building the report again with the persistence check from after the scans.
 powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!New-InvestigationReport.ps1" -FindingsJson "!FINDINGS_JSON!" !SCC_OR_ARGS! -PersistenceInventory "!SCC_AS!\inventory.json" -PersistenceRemoval "!SCC_AS!\removal.json" -PersistenceResult "!SCC_AS!\result.json" !SCC_POWER_ARG! !SCC_SCAN_ARG! -OutputPath "!SCC_RUN_ROOT!\report-after-scans.html"
 if exist "!SCC_RUN_ROOT!\report-after-scans.html" (

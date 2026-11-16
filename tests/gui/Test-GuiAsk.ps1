@@ -83,7 +83,7 @@ try {
     $seen = Invoke-Walk $s $yes
     $txt = $seen -join ' '
     # (8c, the diff, is skipped here: this walk runs no scripts, so no after-snapshot exists.)
-    Check ($txt -match '^2 3 4 ASK:KeepSelection@5 5 6d ASK:OpenReview@6e 6e ASK:PowerRepair@8a 8a 8b (8c )?9a 9b 9c M$') ('order: ' + $txt)
+    Check ($txt -match '^2 3 4 ASK:KeepSelection@5 5 6d ASK:OpenReview@6e 6e ASK:PowerRepair@8a 8a 8b (8c )?9a 9a 9b 9c M$') ('order: ' + $txt)
     $five = @($s.Results | Where-Object { $_.StepId -eq '5' })[0]
     Check ($null -ne $five) 'step 5 ran after its question'
 
@@ -162,7 +162,7 @@ try {
     $s9.RunRoot = Join-Path $work 'share-off'
     $null = New-Item -ItemType Directory -Path $s9.RunRoot -Force
     Set-Content -LiteralPath (Join-Path $s9.RunRoot 'report-after-scans.html') -Value '<html></html>' -Encoding ASCII
-    $call9r = @(@((Get-GuiCatalog).Steps | Where-Object { $_.Id -eq '9r' })[0].Calls)[0]
+    $call9r = @(@((Get-GuiCatalog).Steps | Where-Object { $_.Id -eq '9r' })[0].Calls | Where-Object { $_.Script -eq 'New-InvestigationReport.ps1' })[0]
     $fake9r = [pscustomobject]@{ Kind = 'Script'; Index = 0; Ask = ''; Title = 'r'; Destructive = $false; Builtin = $null; ScriptPath = ''; Args = @(); StepId = '9r'; Call = $call9r; Entry = [pscustomobject]@{ StepId = '9r'; StepTitle = 'r'; Group = 'Report'; Destructive = $false; Call = $call9r } }
     $o = Complete-GuiAction -Session $s9 -Action $fake9r -ExitCode 0
     Check ($o.Message -notlike 'Sharing*' -and $o.Message -like '*sharing is unticked*') 'unticked: the after-scans rebuild (9r) does not say "Sharing"'

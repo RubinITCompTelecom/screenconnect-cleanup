@@ -745,6 +745,9 @@ if ($ScannerSummary -or $ScannersSkipped) {
             }
 
             $scannerName = [string](Get-Prop $s 'Scanner')
+            if (-not $scannerName) { $scannerName = [string](Get-Prop $s 'Tool') }
+            $scannerExitCode = Get-Prop $s 'ExitCode'
+            if ($null -eq $scannerExitCode) { $scannerExitCode = Get-Prop $s 'ProcessExitCode' }
             $findingsSummaryCell = ''
             if ($scannerFindings) {
                 $notParseable = [string](Get-Prop $scannerFindings 'NotParseable')
@@ -760,7 +763,7 @@ if ($ScannerSummary -or $ScannersSkipped) {
                 }
             }
 
-            $rows += "<tr><td>$(Fmt $scannerName)</td><td>$(Fmt (Get-Prop $s 'Tool'))</td><td>$(Fmt (Get-Prop $s 'Status'))</td><td>$(Fmt (Get-Prop $s 'ExitCode'))</td><td>$findingsSummaryCell</td></tr>`n"
+            $rows += "<tr><td>$(Fmt $scannerName)</td><td>$(Fmt (Get-Prop $s 'Tool'))</td><td>$(Fmt (Get-Prop $s 'Status'))</td><td>$(Fmt $scannerExitCode)</td><td>$findingsSummaryCell</td></tr>`n"
             $filterSuspected = [string](Get-Prop $s 'FilterSuspected')
             if ($filterSuspected -match '(?i)^(true|1|yes)$') {
                 $classification = [string](Get-Prop $s 'FilterClassification')
@@ -808,7 +811,7 @@ if ($ScannerSummary -or $ScannersSkipped) {
         if ($scannerError) {
             $scannerNote = "<p class='warn-line'>$(Fmt $scannerError)</p>"
         } else {
-            $scannerNote = "<p class='muted'>Each scanner ran as a visible attended GUI driven by the technician. Any status other than Completed means the scan did not finish or was unavailable - treat the scan as NOT done. Source: $(Fmt $ScannerSummary)</p>"
+            $scannerNote = "<p class='muted'>Scanner sessions are attended by the technician. Any status other than Completed means the session was skipped, unavailable, failed or unverified - treat the scan as NOT done. Source: $(Fmt $ScannerSummary)</p>"
         }
         if ($scannerWarnings) { $scannerNote += $scannerWarnings }
         $scannerSectionHtml = @"

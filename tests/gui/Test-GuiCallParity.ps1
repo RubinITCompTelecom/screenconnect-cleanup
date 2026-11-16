@@ -230,7 +230,7 @@ try {
     [void](Initialize-GuiRunRoot -Session $s)
     $g = Invoke-GuiHeadless $s $desktop 'gui-detect'
     $names = @($g.Trace | ForEach-Object { $_.Split('|')[0] })
-    Check (($names -join ',') -eq 'preflight.ps1,collect-snapshot.ps1,detect-remote-access.ps1,New-InvestigationReport.ps1') 'detect-only runs preflight, before snapshot, detection and the report - nothing else'
+    Check (($names -join ',') -eq 'preflight.ps1,collect-snapshot.ps1,detect-remote-access.ps1,Write-ScannerSummary.ps1,New-InvestigationReport.ps1') 'detect-only runs preflight, snapshot, detection and local report preparation'
     foreach ($never in 'Invoke-ReviewAndRemove.ps1', 'remove-screenconnect.ps1', 'Invoke-PersistenceScan.ps1', 'Submit-ConnectWiseReport.ps1', 'Repair-PowerOptions.ps1', 'Invoke-AVUninstaller.ps1') {
         Check (-not (Has $g $never)) ('detect-only never runs ' + $never)
     }

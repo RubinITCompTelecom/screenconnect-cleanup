@@ -110,7 +110,7 @@ exit 7
     Write-Host 'Unknown prompt fallback' -ForegroundColor Cyan
     $unk = Write-Script 'unknown.ps1' @'
 Write-Host 'working...'
-Write-Host 'Pick a colour:' -NoNewline
+Write-Host 'Awaiting technician approval' -NoNewline
 $a = Read-Host
 Write-Host ''
 Write-Host ('COLOUR=' + $a)

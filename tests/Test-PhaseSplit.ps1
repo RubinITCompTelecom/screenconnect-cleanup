@@ -13,7 +13,7 @@
   network, no C:\RIT-SCC (run folders go to a temp directory). Needs no admin.
 
   Checks:
-    OFFLINE  runs local steps and staged KVRT/ESET, never downloads or uninstalls AV
+    OFFLINE  runs local steps and staged KVRT, never downloads or uninstalls AV
              uninstall, builds the package with -NoUpload, writes phase-offline.json
     ONLINE   continues that run: stages, runs the 3 scanners, shares WITHOUT
              -NoUpload using the offline run's findings, runs none of the local steps
@@ -222,7 +222,7 @@ try {
     }
     Check ((CountOf $off 'collect-snapshot.ps1') -eq 2) 'offline takes the before and after snapshots'
     $offlineScans = @($off.Trace | Where-Object { $_ -like 'Invoke-GUIScanner.ps1|*' })
-    Check ($offlineScans.Count -eq 2 -and ($offlineScans -join ' ') -notmatch '-Scanner Malwarebytes') 'offline launches staged KVRT and ESET without Malwarebytes installation'
+    Check ($offlineScans.Count -eq 1 -and $offlineScans[0] -match '-Scanner KVRT' -and ($offlineScans -join ' ') -notmatch '-Scanner (ESET|Malwarebytes)') 'offline launches staged KVRT and skips ESET and Malwarebytes'
     # Real-PC finding 2026-11-09: preflight hard-failed on the missing Sysinternals pack, which the offline half never downloads.
     $perOff = @($off.Trace | Where-Object { $_ -like 'Invoke-PersistenceScan.ps1|*' })[0]
     Check ($perOff -like '*-InventorySectionTimeoutSeconds 240*') 'offline gives the persistence inventory write more time'

@@ -355,13 +355,13 @@ try {
     $r = Invoke-Window 'offline-all' 'Offline' @{
         KeepSelection = @{ Keep = @() }
         RemoveConfirm = @{ Value = 'ok'; Text = 'REMOVE' }
-        Scanners = @{ Value = 'go'; Checks = @{ ScanKvrt = $true; ScanEset = $true; ScanMalwarebytes = $false } }
+        Scanners = @{ Value = 'go'; Checks = @{ ScanKvrt = $true; ScanEset = $false; ScanMalwarebytes = $false } }
         OpenReview = @{ Value = 'y' }
         PowerRepair = @{ Value = 'go'; Checks = @{ PowerRepair = $true; ResetGpo = $true } }; LowDisk = @{ Value = 'y' } } -RepairWritesResult
     if ($r.State) {
         $plan = Get-Plan $r.State.RunRoot
         Check ($plan -and $plan.Decision -eq 'ALL_REMOVE' -and @($plan.ScreenConnectInstances).Count -eq 3) 'keeping nothing removes all three (the batch file''s default)'
-        Check ((($r.Names) -join ',') -eq 'preflight.ps1,collect-snapshot.ps1,detect-remote-access.ps1,remove-screenconnect.ps1,Invoke-GUIScanner.ps1,Invoke-GUIScanner.ps1,Invoke-PersistenceScan.ps1,Show-PersistenceReview.ps1,Repair-PowerOptions.ps1,collect-snapshot.ps1,diff-snapshots.ps1,Write-ScannerSummary.ps1,New-InvestigationReport.ps1,Submit-ConnectWiseReport.ps1') ('every optional offline step ran, including both staged scanners, in the batch file''s order: ' + ($r.Names -join ', '))
+        Check ((($r.Names) -join ',') -eq 'preflight.ps1,collect-snapshot.ps1,detect-remote-access.ps1,remove-screenconnect.ps1,Invoke-GUIScanner.ps1,Invoke-PersistenceScan.ps1,Show-PersistenceReview.ps1,Repair-PowerOptions.ps1,collect-snapshot.ps1,diff-snapshots.ps1,Write-ScannerSummary.ps1,New-InvestigationReport.ps1,Submit-ConnectWiseReport.ps1') ('every optional offline step ran, including staged KVRT only, in the batch file''s order: ' + ($r.Names -join ', '))
         $pr = @($r.Calls | Where-Object { $_ -like 'Repair-PowerOptions.ps1|*' })[0]
         Check ($pr -like '*-ResetLocalGpo') 'power repair with the GPO reset passes -ResetLocalGpo last'
         Check ($r.State.RestartVisible -eq $true) 'the restart offer appears: a repair ran, the report was written and opened'

@@ -69,7 +69,7 @@
     },
     {
       "Id": "6b", "Title": "Scanner: ESET Online Scanner", "Group": "Scanners",
-      "Phases": ["ALL", "OFFLINE", "ONLINE"],
+      "Phases": ["ALL", "ONLINE"],
       "Calls": [
         { "Script": "Invoke-GUIScanner.ps1", "Args": ["-Scanner", "ESET", "-ResultPath", "{RunRoot}\\logs\\scanner-ESET-result.json"], "Before": "EnsureLogsDir",
           "Ask": "Scanners", "When": ["Answer:ScanEset"], "SkipText": "Skipped by the technician.",

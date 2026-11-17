@@ -353,7 +353,7 @@
               <StackPanel>
                 <TextBlock FontSize="14" FontWeight="SemiBold" Text="Offline - cleanup, no internet needed"/>
                 <TextBlock Style="{StaticResource Text.Muted}" Margin="0,3,0,0"
-                           Text="Preflight, before snapshot, detection, removal (you choose what to keep, then confirm), staged KVRT/ESET scans, persistence review, after snapshot and diff, local report. Missing scanners are skipped. ESET may need internet. The cleanup tool downloads and uploads nothing."/>
+                           Text="Preflight, before snapshot, detection, removal (you choose what to keep, then confirm), staged KVRT scan, persistence review, after snapshot and diff, local report. Missing KVRT is skipped. ESET and Malwarebytes run in Online mode. Downloads and uploads nothing."/>
               </StackPanel>
             </RadioButton>
             <RadioButton x:Name="RbOnline" GroupName="Mode" Style="{StaticResource ModeCard}">

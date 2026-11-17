@@ -774,11 +774,12 @@ function Resolve-Ask {
             $avDir = Join-Path $sess.ToolRoot 'tools\AV'
             $kv = Test-Path -LiteralPath (Join-Path $avDir 'KVRT.exe'); $es = Test-Path -LiteralPath (Join-Path $avDir 'esetonlinescanner.exe')
             $offline = $sess.Phase -eq 'OFFLINE'
+            if ($offline) { $es = $false }
             $scanMessage = 'Each scanner opens in its own window. Complete it, then return here. Choose the scans to run.'
-            if ($offline) { $scanMessage = 'Run scanners already staged in this folder. Missing scanners are skipped; nothing is downloaded by the cleanup tool. ESET may require internet in its own window. Complete each scanner, then return here.' }
+            if ($offline) { $scanMessage = 'Run KVRT if it is already staged in this folder. Missing KVRT is skipped; nothing is downloaded. ESET and Malwarebytes run in Online mode. Complete the scan, then return here.' }
             $r = Show-Dialog -Id 'Scanners' -Title 'Antivirus scans' -Message $scanMessage -Checks @(
                 [pscustomobject]@{ Key = 'ScanKvrt'; Text = 'KVRT' + $(if ($kv) { '' } else { '  (not staged - run the Online or Stage step first)' }); Checked = $kv; Enabled = $kv },
-                [pscustomobject]@{ Key = 'ScanEset'; Text = 'ESET Online Scanner' + $(if ($es) { '' } else { '  (not staged - run the Online or Stage step first)' }); Checked = $es; Enabled = $es },
+                [pscustomobject]@{ Key = 'ScanEset'; Text = $(if ($offline) { 'ESET Online Scanner (Online mode only)' } else { 'ESET Online Scanner' + $(if ($es) { '' } else { '  (not staged - run the Online or Stage step first)' }) }); Checked = $es; Enabled = $es },
                 [pscustomobject]@{ Key = 'ScanMalwarebytes'; Text = $(if ($offline) { 'Malwarebytes (installation available in Online mode)' } else { 'Malwarebytes (installed through winget, then the official offline installer)' }); Checked = (-not $offline); Enabled = (-not $offline) }) `
                 -Buttons @(@{ Text = 'Start the selected scans'; Value = 'go' }, @{ Text = 'Skip all scans'; Value = 'skip' })
             $vals = @{ ScanKvrt = $false; ScanEset = $false; ScanMalwarebytes = $false }

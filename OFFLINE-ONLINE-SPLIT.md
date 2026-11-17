@@ -8,7 +8,7 @@ internet?**
 
 | Launcher | Half | Needs internet? | What it does |
 |---|---|---|---|
-| `START-HERE-OFFLINE.bat` | 1 - cleanup (steps 1-7) | **Cleanup needs none; staged scanners may need a connection.** | preflight, before snapshot, detection, ScreenConnect removal (one typed confirmation), optional staged KVRT/ESET scans, persistence review, optional power-options repair, after snapshot + diff, local report + package; no staging or upload |
+| `START-HERE-OFFLINE.bat` | 1 - cleanup (steps 1-7) | **No.** | preflight, before snapshot, detection, ScreenConnect removal (one typed confirmation), optional staged KVRT scan, persistence review, optional power-options repair, after snapshot + diff, local report + package; no staging or upload |
 | `START-HERE-ONLINE.bat` | 2 - scan + share (steps 1-5) | **Yes** | stages KVRT / ESET (and the tool pack), runs the attended scanners (KVRT, ESET, Malwarebytes), optional AV uninstall, shares the sanitized report |
 
 These are the console launchers, in the zip's `files\` folder; the window (`START-HERE-GUI.bat`, at
@@ -35,11 +35,11 @@ stay in the run folder under `C:\RIT-SCC\`. Nothing is shared.
 
 **Preparing a USB stick or a folder for a no-connection job:** run Stage tools
 in the GUI or `START-HERE.bat --stage` while connected, then copy the complete
-folder. Offline offers already-staged KVRT and ESET after ScreenConnect removal,
-before the persistence check and final snapshots. Missing scanners are skipped;
+folder. Offline offers already-staged KVRT after ScreenConnect removal,
+before the persistence check and final snapshots. Missing KVRT is skipped;
 the cleanup tool does not download replacements. Without staging, the cleanup
-still runs. ESET may need internet in its own window. Malwarebytes installation
-remains in Online mode because it is not part of the staged pack.
+still runs. ESET is Online-only because it needs internet. Malwarebytes installation
+also remains in Online mode because it is not part of the staged pack.
 
 ## How the two halves hand over
 
@@ -89,9 +89,9 @@ starts nothing. Before this, the window went straight to the scanners and the cl
 - **Malwarebytes** is still installed when its step runs (winget, then the
   official installer download), so it belongs to the online half. It is not
   pre-staged by `START-HERE.bat --stage`.
-- **Staged scanners.** Offline attempts locally staged KVRT and ESET with the
-  same attended launch and signature checks as Online. Availability of the EXE
-  does not guarantee its vendor UI can finish a scan without internet.
+- **Staged scanners.** Offline attempts locally staged KVRT with the same
+  attended launch and signature checks as Online. ESET is skipped in Offline
+  even when its EXE is staged, because it needs internet.
 - **AV uninstall** (attended, default No) is in the online half, after the
   scanners, as in the full run. Its Malwarebytes path uses winget.
 - **The Sysinternals tool pack is not used by the guided steps** (only the
@@ -152,7 +152,7 @@ What select mode does **not** do:
 
 `sc-cleanup.ps1` already had `-offline` (use the pre-staged pack, download
 nothing) and `-sa` (no scanners), and `-NoShare` (no upload). The guided Offline
-half now offers staged KVRT/ESET, so it no longer corresponds to skipping all
+half now offers staged KVRT, so it no longer corresponds to skipping all
 scanners with `-sa`. Nothing about `sc-cleanup.ps1` changed.
 
 ## What changed in the code

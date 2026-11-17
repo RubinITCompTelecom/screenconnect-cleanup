@@ -147,7 +147,7 @@ try {
         Check (-not (Has $gOff $never)) ('GUI offline never runs ' + $never)
     }
     $offlineScans = @($gOff.Trace | Where-Object { $_ -like 'Invoke-GUIScanner.ps1|*' })
-    Check ($offlineScans.Count -eq 2 -and ($offlineScans -join ' ') -notmatch '-Scanner Malwarebytes') 'GUI offline launches both staged scanners without installing Malwarebytes'
+    Check ($offlineScans.Count -eq 1 -and $offlineScans[0] -match '-Scanner KVRT' -and ($offlineScans -join ' ') -notmatch '-Scanner (ESET|Malwarebytes)') 'GUI offline launches staged KVRT and skips ESET and Malwarebytes'
     $sub = @($gOff.Trace | Where-Object { $_ -like 'Submit-ConnectWiseReport.ps1|*' })[0]
     Check ($sub -like '*-NoUpload*') 'GUI offline builds the package with -NoUpload'
     $revBat = @($batOff.Trace | Where-Object { $_ -like 'Invoke-ReviewAndRemove.ps1|*' })[0]

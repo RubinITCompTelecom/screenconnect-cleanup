@@ -3,6 +3,11 @@
 Semantic versions. The deploy zip is named `screenconnect-cleanup-v<VER>.zip`
 and carries a `VERSION` file so each build is self-identifying.
 
+## [1.8.12-gui-alpha.9] - 2026-11-17 - Explain Online continuation choices (ALPHA)
+- The Online continuation dialog explains using the completed Offline evidence versus starting separate scans, including report/sharing behavior and optional KVRT reruns. Neither choice repeats ScreenConnect detection or removal.
+- Cancel and closing the continuation dialog start nothing; closing previously continued the Offline run automatically.
+- Earlier run folders are correctly described as view-only in that list, with completed Offline runs available to continue through Online.
+
 ## [1.8.12-gui-alpha.8] - 2026-11-17 - Keep internet-dependent scanners in Online mode (ALPHA)
 - Offline offers staged KVRT only. ESET is skipped even when its executable is staged, because it needs internet. Malwarebytes installation remains Online-only.
 - GUI and batch launchers agree on the Offline scanner selection; Online still offers all three scanners.

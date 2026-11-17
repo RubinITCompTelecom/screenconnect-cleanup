@@ -1,7 +1,7 @@
 # ScreenConnect Cleanup
 
-**ALPHA: 1.8.12-gui-alpha.8.** This GUI build is for testing; live elevated Windows acceptance
-is still required. Download it from the [separate alpha prerelease](https://github.com/pupontech/screenconnect-cleanup/releases/tag/v1.8.12-gui-alpha.8).
+**ALPHA: 1.8.12-gui-alpha.9.** This GUI build is for testing; live elevated Windows acceptance
+is still required. Download it from the [separate alpha prerelease](https://github.com/pupontech/screenconnect-cleanup/releases/tag/v1.8.12-gui-alpha.9).
 Existing releases remain available. The installer command below continues to download GitHub's current Latest release.
 
 A Windows technician tool for PCs where a scammer got remote access through ScreenConnect. It usually

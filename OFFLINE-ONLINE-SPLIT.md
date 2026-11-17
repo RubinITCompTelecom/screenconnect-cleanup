@@ -148,6 +148,23 @@ What select mode does **not** do:
 - The kept choice is per run. It is not remembered; the next run asks again.
 - The direct runner `sc-cleanup.ps1` has no select mode (unchanged).
 
+## Choosing Online after Offline in the window
+
+When Online finds a completed Offline run, the window offers:
+
+- **Continue Offline run:** use its evidence and folder, run selected scanners,
+  check persistence again and offer antivirus uninstall. Update the combined
+  report; upload it only if sharing is ticked.
+- **Start separate scans:** use a new folder for selected scanners, persistence
+  and optional antivirus uninstall. The Offline evidence/report stays unchanged;
+  no combined report is created or uploaded.
+- **Cancel**, or the window X: start nothing.
+
+Neither scan choice repeats ScreenConnect detection or removal. The scanner
+selection is shown again, so KVRT can be run again after an Offline scan. Online
+may download scanner tools. The earlier-run list is for viewing; use Online to
+continue a completed Offline run.
+
 ## Direct runner
 
 `sc-cleanup.ps1` already had `-offline` (use the pre-staged pack, download

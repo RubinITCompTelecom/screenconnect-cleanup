@@ -854,9 +854,18 @@ function Start-Run {
     if ($ModeName -eq 'Online') {
         $prior = Find-GuiPriorRun -Session $sess
         if ($prior) {
-            $r = Show-Dialog -Id 'ContinuePrior' -Title 'Continue the offline run?' -Message ('A finished offline-half run was found for this PC:' + "`r`n" + $prior.RunRoot + "`r`n`r`nContinue that run? " + $(if ($share) { 'Its report is shared at the end.' } else { 'Its report is updated on this PC but not shared (the share box is unticked).' }) + " Otherwise a scanner-only run starts and nothing is shared.") -Buttons @(
-                @{ Text = 'Continue that run'; Value = 'continue' }, @{ Text = 'Start a scanner-only run'; Value = 'new' })
-            if ($r -and $r.Value -eq 'new') { $prior = $null }
+            $r = Show-Dialog -Id 'ContinuePrior' -Title 'How should Online use the Offline results?' `
+                -Message ('Continue Offline run: keep its evidence and folder, run selected scanners, check persistence again, and offer antivirus uninstall. Update the combined report. ' + $(if ($share) { 'The updated report is shared at the end.' } else { 'The updated report stays local because sharing is unticked.' }) + "`r`n`r`n" +
+                    'Start separate scans: use a new folder for scanners, persistence and optional antivirus uninstall. Leave Offline results unchanged. No combined report or upload.' + "`r`n`r`n" +
+                    'Neither repeats ScreenConnect detection or removal. You choose the scans; KVRT can run again. Online may download tools. Cancel or close to start nothing.') `
+                -Detail ('Completed Offline run: ' + $prior.RunRoot) -Buttons @(
+                @{ Text = 'Continue Offline run'; Value = 'continue' }, @{ Text = 'Start separate scans'; Value = 'new' }, @{ Text = 'Cancel'; Value = 'cancel' })
+            if (-not $r -or $r.Value -notin @('continue', 'new')) {
+                Add-ConsoleNote 'No run started: the Online continuation choice was cancelled.'
+                if ($script:AutoStart) { $win.Close() }
+                return
+            }
+            if ($r.Value -eq 'new') { $prior = $null }
         } else {
             # No finished offline-half run on this PC (staging the tools does not make one). The Online
             # half has no removal step, so starting it here used to go straight to the scanners and the
@@ -1328,7 +1337,7 @@ Update-HeaderButtons
 try {
     $prior = @(Get-ChildItem -LiteralPath $RitRoot -Directory -ErrorAction Stop | Where-Object { $_.Name -like ($env:COMPUTERNAME + '-*') } | Sort-Object LastWriteTime -Descending | Select-Object -First 3)
     if ($prior.Count -gt 0) {
-        $ui.PriorRunsText.Text = "Earlier runs on this PC (view only, they are never resumed):`r`n" + (($prior | ForEach-Object { '  ' + $_.FullName + '   ' + $_.LastWriteTime.ToString('yyyy-MM-dd HH:mm') }) -join "`r`n")
+        $ui.PriorRunsText.Text = "Earlier runs on this PC (view only here; Online can continue a completed Offline run):`r`n" + (($prior | ForEach-Object { '  ' + $_.FullName + '   ' + $_.LastWriteTime.ToString('yyyy-MM-dd HH:mm') }) -join "`r`n")
     }
 } catch { }
 

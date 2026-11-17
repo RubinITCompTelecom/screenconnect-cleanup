@@ -143,9 +143,11 @@ try {
     Check (Same $a $b) ('GUI offline trace equals START-HERE-OFFLINE.bat (' + $b.Count + ' calls)')
     if (-not (Same $a $b)) { Show-Diff $a $b }
     Check (Test-Path -LiteralPath (Join-Path $s1.RunRoot 'phase-offline.json')) 'GUI offline half wrote phase-offline.json (real helper)'
-    foreach ($never in 'Get-ToolPack.ps1', 'Get-AVTools.ps1', 'Invoke-GUIScanner.ps1', 'Invoke-AVUninstaller.ps1') {
+    foreach ($never in 'Get-ToolPack.ps1', 'Get-AVTools.ps1', 'Invoke-AVUninstaller.ps1') {
         Check (-not (Has $gOff $never)) ('GUI offline never runs ' + $never)
     }
+    $offlineScans = @($gOff.Trace | Where-Object { $_ -like 'Invoke-GUIScanner.ps1|*' })
+    Check ($offlineScans.Count -eq 2 -and ($offlineScans -join ' ') -notmatch '-Scanner Malwarebytes') 'GUI offline launches both staged scanners without installing Malwarebytes'
     $sub = @($gOff.Trace | Where-Object { $_ -like 'Submit-ConnectWiseReport.ps1|*' })[0]
     Check ($sub -like '*-NoUpload*') 'GUI offline builds the package with -NoUpload'
     $revBat = @($batOff.Trace | Where-Object { $_ -like 'Invoke-ReviewAndRemove.ps1|*' })[0]

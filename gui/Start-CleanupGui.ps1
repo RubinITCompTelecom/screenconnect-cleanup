@@ -383,13 +383,25 @@ function New-DialogWindow {
         [void]$sp.Children.Add($d)
     }
     $tag = @{ Checks = @{}; Text = $null; Word = $TypeWord; Gated = @() }
+    $checkHost = $sp
+    if (@($Checks).Count -gt 0) {
+        $checkHost = New-Object System.Windows.Controls.StackPanel
+        $scroll = New-Object System.Windows.Controls.ScrollViewer
+        $scroll.MaxHeight = 260; $scroll.MaxWidth = 610
+        $scroll.VerticalScrollBarVisibility = 'Auto'; $scroll.HorizontalScrollBarVisibility = 'Disabled'
+        $scroll.Content = $checkHost
+        [void]$sp.Children.Add($scroll)
+    }
     foreach ($c in @($Checks)) {
         $cb = New-Object System.Windows.Controls.CheckBox
-        $cb.Content = $c.Text; $cb.IsChecked = [bool]$c.Checked; $cb.IsEnabled = $(if ($c.PSObject.Properties['Enabled']) { [bool]$c.Enabled } else { $true })
+        $label = New-Object System.Windows.Controls.TextBlock
+        $label.Text = $c.Text; $label.TextWrapping = 'Wrap'
+        $cb.Content = $label; $cb.HorizontalContentAlignment = 'Stretch'
+        $cb.IsChecked = [bool]$c.Checked; $cb.IsEnabled = $(if ($c.PSObject.Properties['Enabled']) { [bool]$c.Enabled } else { $true })
         $cb.Margin = New-Object System.Windows.Thickness(0, 10, 0, 0); $cb.Foreground = Get-Brush 'Foreground'
         if ($c.PSObject.Properties['DependsOn'] -and $c.DependsOn) { $cb.Tag = [string]$c.DependsOn }
         $tag.Checks[[string]$c.Key] = $cb
-        [void]$sp.Children.Add($cb)
+        [void]$checkHost.Children.Add($cb)
     }
     foreach ($cb in @($tag.Checks.Values)) {
         if ($cb.Tag) {
@@ -478,6 +490,23 @@ function Get-RecentConsole {
     return (($lines[($lines.Count - $take)..($lines.Count - 1)]) -join "`r`n")
 }
 
+function Get-PersistenceCandidateChecks {
+    # Translate only the current child's complete printed list. Never infer engine eligibility.
+    param([string]$OutputText)
+    $start = [regex]::Match($OutputText, '(?m)^\[1\] (?:ScheduledTask|RunKey|StartupFile)\r?$')
+    if (-not $start.Success) { return }
+    $list = $OutputText.Substring($start.Index).TrimEnd()
+    $pattern = '(?m)^\[(?<Index>[1-9][0-9]*)\] (?:ScheduledTask|RunKey|StartupFile)\r?\n    Target: [^\r\n]+\r?\n    Command: [^\r\n]+\r?\n    Reason: [^\r\n]+'
+    $rows = [regex]::Matches($list, $pattern)
+    if ([regex]::Replace($list, $pattern, '').Trim().Length -ne 0) { return }
+    $checks = @()
+    foreach ($match in $rows) {
+        if ([int]$match.Groups['Index'].Value -ne ($checks.Count + 1)) { return }
+        $checks += [pscustomobject]@{ Key = $match.Groups['Index'].Value; Text = $match.Value; Checked = $false }
+    }
+    return $checks
+}
+
 function Get-RemovalPlanText {
     # The exact instances the confirmation covers: what the findings say, minus what the technician marked KEEP.
     $view = Get-GuiFindingsView -Path $script:Session.FindingsJson
@@ -536,15 +565,25 @@ function Resolve-Prompt {
             if ($r) { $send = $r.Value }
         }
         'PersistIndices' {
-            $r = Show-Dialog -Id 'PersistIndices' -Title 'Persistence cleanup - choose candidates' -TextInput `
-                -Message 'The persistence review found the candidates listed below (heuristic matches, not malware verdicts). Type the numbers of the ones to remove, separated by commas, or choose Remove nothing.' `
-                -Detail (Get-RecentConsole 30) -Buttons @(@{ Text = 'Continue'; Value = 'send' }, @{ Text = 'Remove nothing'; Value = 'skip' })
-            if ($r -and $r.Value -eq 'send') { $send = $r.Text }
+            $script:PersistenceSelectionText = ''
+            $checks = @(Get-PersistenceCandidateChecks -OutputText $script:PersistenceOutput)
+            if ($checks.Count -eq 0) {
+                Add-ConsoleNote 'Could not read the complete persistence candidate list. Removing nothing.'
+                break
+            }
+            $r = Show-Dialog -Id 'PersistIndices' -Title 'Persistence cleanup - choose candidates' -Checks $checks `
+                -Message 'Tick the entries to remove. Leave entries unticked to keep them. These are heuristic matches, not malware verdicts. Continue reviews your selection before removal.' `
+                -Buttons @(@{ Text = 'Continue'; Value = 'send' }, @{ Text = 'Remove nothing'; Value = 'skip' })
+            if ($r -and $r.Value -eq 'send') {
+                $selected = @($checks | Where-Object { $r.Checks[$_.Key] })
+                $send = (@($selected | ForEach-Object { $_.Key }) -join ',')
+                $script:PersistenceSelectionText = (@($selected | ForEach-Object { $_.Text }) -join "`r`n`r`n")
+            }
         }
         'PersistRemove' {
             $r = Show-Dialog -Id 'PersistRemove' -Title 'Confirm persistence cleanup' -TypeWord 'REMOVE' `
                 -Message ('These exact persistence entries will be backed up and removed. Type REMOVE to confirm.') `
-                -Detail (Get-RecentConsole 20) -Buttons @(@{ Text = 'Remove'; Value = 'ok'; NeedsWord = $true }, @{ Text = 'Do not remove'; Value = 'cancel' })
+                -Detail $script:PersistenceSelectionText -Buttons @(@{ Text = 'Remove'; Value = 'ok'; NeedsWord = $true }, @{ Text = 'Do not remove'; Value = 'cancel' })
             if ($r -and $r.Value -eq 'ok') { $send = $r.Text; $script:CloseLock = $true }
         }
         default {
@@ -662,7 +701,7 @@ function Show-Findings {
     }
     if (@($view.OtherTargets).Count -gt 0) {
         $oh = New-Object System.Windows.Controls.TextBlock
-        $oh.Text = 'Other remote-access products (reported only - this tool never removes these)'; $oh.FontWeight = 'SemiBold'; $oh.Margin = New-Object System.Windows.Thickness(0, 6, 0, 4)
+        $oh.Text = 'Other remote-access products'; $oh.FontWeight = 'SemiBold'; $oh.Margin = New-Object System.Windows.Thickness(0, 6, 0, 4)
         [void]$ui.CardsHost.Children.Add($oh)
         foreach ($o in $view.OtherTargets) {
             $t = New-Object System.Windows.Controls.TextBlock
@@ -734,10 +773,13 @@ function Resolve-Ask {
         'Scanners' {
             $avDir = Join-Path $sess.ToolRoot 'tools\AV'
             $kv = Test-Path -LiteralPath (Join-Path $avDir 'KVRT.exe'); $es = Test-Path -LiteralPath (Join-Path $avDir 'esetonlinescanner.exe')
-            $r = Show-Dialog -Id 'Scanners' -Title 'Antivirus scans' -Message 'Each scanner opens in its own window. Complete it, then return here. Choose the scans to run.' -Checks @(
+            $offline = $sess.Phase -eq 'OFFLINE'
+            $scanMessage = 'Each scanner opens in its own window. Complete it, then return here. Choose the scans to run.'
+            if ($offline) { $scanMessage = 'Run scanners already staged in this folder. Missing scanners are skipped; nothing is downloaded by the cleanup tool. ESET may require internet in its own window. Complete each scanner, then return here.' }
+            $r = Show-Dialog -Id 'Scanners' -Title 'Antivirus scans' -Message $scanMessage -Checks @(
                 [pscustomobject]@{ Key = 'ScanKvrt'; Text = 'KVRT' + $(if ($kv) { '' } else { '  (not staged - run the Online or Stage step first)' }); Checked = $kv; Enabled = $kv },
                 [pscustomobject]@{ Key = 'ScanEset'; Text = 'ESET Online Scanner' + $(if ($es) { '' } else { '  (not staged - run the Online or Stage step first)' }); Checked = $es; Enabled = $es },
-                [pscustomobject]@{ Key = 'ScanMalwarebytes'; Text = 'Malwarebytes (installed through winget, then the official offline installer)'; Checked = $true; Enabled = $true }) `
+                [pscustomobject]@{ Key = 'ScanMalwarebytes'; Text = $(if ($offline) { 'Malwarebytes (installation available in Online mode)' } else { 'Malwarebytes (installed through winget, then the official offline installer)' }); Checked = (-not $offline); Enabled = (-not $offline) }) `
                 -Buttons @(@{ Text = 'Start the selected scans'; Value = 'go' }, @{ Text = 'Skip all scans'; Value = 'skip' })
             $vals = @{ ScanKvrt = $false; ScanEset = $false; ScanMalwarebytes = $false }
             if ($r -and $r.Value -eq 'go') { foreach ($k in @($vals.Keys)) { $vals[$k] = [bool]$r.Checks[$k] } }
@@ -957,6 +999,7 @@ function Move-Next {
         $script:CloseLock = [bool]$a.Destructive
         Add-ConsoleLines @('', ('=== Step ' + $a.StepId + ': ' + $a.Title + ' ==='), ('> ' + [IO.Path]::GetFileName($a.ScriptPath) + ' ' + (ConvertTo-GuiArgString $a.Args)))
         try {
+            $script:PersistenceOutput = ''; $script:PersistenceSelectionText = ''
             $script:Child = Start-GuiChild -ScriptPath $a.ScriptPath -ArgumentList $a.Args -WorkingDirectory $script:Session.ToolRoot
         } catch {
             Add-ConsoleNote ('Could not start ' + $a.ScriptPath + ': ' + $_.Exception.Message)
@@ -1161,6 +1204,9 @@ function Invoke-Tick {
     if ($script:InDialog -or -not $script:Child) { return }
     $u = Update-GuiChild -Child $script:Child
     if (@($u.Lines).Count -gt 0) {
+        if ($script:Action -and $script:Action.Call.PSObject.Properties['Prompts'] -and @($script:Action.Call.Prompts) -contains 'PersistIndices') {
+            $script:PersistenceOutput += (@($u.Lines) -join "`n") + "`n"
+        }
         Add-ConsoleLines $u.Lines
         if ($script:Action -and ($script:Action.StepId -eq '9b' -or $script:Action.StepId -eq '9o')) {
             $url = Get-GuiShareUrl $u.Lines
@@ -1180,6 +1226,7 @@ function Invoke-Tick {
             if ($r -and $r.Value -eq 'retry') {
                 Add-ConsoleNote ('Running step ' + $a.StepId + ' again at the technician''s request.')
                 Add-ConsoleLines @('', ('=== Step ' + $a.StepId + ': ' + $a.Title + ' (again) ==='))
+                $script:PersistenceOutput = ''; $script:PersistenceSelectionText = ''
                 $script:Child = Start-GuiChild -ScriptPath $a.ScriptPath -ArgumentList $a.Args -WorkingDirectory $script:Session.ToolRoot
                 $script:CloseLock = [bool]$a.Destructive
                 return

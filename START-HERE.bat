@@ -12,7 +12,7 @@ rem  SPLIT (offline / online halves). With no flag this is the full pipeline,
 rem  unchanged. Technicians start one of the two launchers, which pass one flag:
 rem    --offline  START-HERE-OFFLINE.bat  cleanup that needs NO internet: preflight,
 rem               snapshots, detection, removal, persistence review, diff, local
-rem               report. No downloads, no scanners, no upload. Shown as steps 1-7.
+rem               report, plus staged KVRT/ESET. No staging or upload. Steps 1-7.
 rem               When ScreenConnect is found it asks whether any should be KEPT.
 rem               Its run folder is created LOCKED to administrators, because the
 rem               online half continues it later (tools\RunRootSecurity.psm1).
@@ -82,7 +82,6 @@ set "SCC_SUBMIT_ARGS="
 set "SCC_SCANNER_ONLY=0"
 if /i "!SCC_PHASE!"=="OFFLINE" (
     set "SCC_DO_STAGE=0"
-    set "SCC_DO_SCAN=0"
     set "SCC_DO_AVU=0"
     set "SCC_DO_SHARE=0"
     set "SCC_SUBMIT_ARGS=-NoUpload"
@@ -196,6 +195,7 @@ echo   Runs by itself except Step 4, which asks ONE typed
 echo   confirmation before removal. Ctrl+C aborts.
 echo.
 echo   1 preflight  2 before snapshot  3 detect  4 remove
+echo   Optional: run KVRT/ESET already staged in tools\AV.
 echo   5 persistence  6 after snapshot + diff  7 report
 echo.
 echo   Nothing is downloaded or uploaded. Afterwards, once the PC is
@@ -308,16 +308,18 @@ if exist "!SCC_DP0!Invoke-ReviewAndRemove.ps1" (
 
 :after_pre
 
-rem ---- Step 6: antivirus scans (internet) - online half only ---------------------
+rem ---- Step 6: attended antivirus scans; offline uses staged KVRT/ESET only -----
 if "!SCC_DO_SCAN!"=="0" goto :scanners_skipped_phase
 echo.
 if /i "!SCC_PHASE!"=="ONLINE" echo  STEP 2/5: Antivirus scans (attended)
-if /i not "!SCC_PHASE!"=="ONLINE" echo  STEP 6/9: Antivirus scans (attended)
+if /i "!SCC_PHASE!"=="OFFLINE" echo  Optional staged scanners (attended, no downloads by this tool)
+if /i not "!SCC_PHASE!"=="ONLINE" if /i not "!SCC_PHASE!"=="OFFLINE" echo  STEP 6/9: Antivirus scans (attended)
 echo    Each scanner opens visibly. Complete it, then return here.
 
 echo.
 if /i "!SCC_PHASE!"=="ONLINE" echo    -- 2a: KVRT --
-if /i not "!SCC_PHASE!"=="ONLINE" echo    -- 6a: KVRT --
+if /i "!SCC_PHASE!"=="OFFLINE" echo    -- 4a: Staged KVRT --
+if /i not "!SCC_PHASE!"=="ONLINE" if /i not "!SCC_PHASE!"=="OFFLINE" echo    -- 6a: KVRT --
 set /p GO="    Launch KVRT? [Y/n] "
 set "SCC_KVRT_STATE=Skipped"
 if /i not "%GO%"=="n" (
@@ -335,7 +337,8 @@ set GO=
 
 echo.
 if /i "!SCC_PHASE!"=="ONLINE" echo    -- 2b: ESET Online Scanner --
-if /i not "!SCC_PHASE!"=="ONLINE" echo    -- 6b: ESET Online Scanner --
+if /i "!SCC_PHASE!"=="OFFLINE" echo    -- 4b: Staged ESET Online Scanner (may require internet) --
+if /i not "!SCC_PHASE!"=="ONLINE" if /i not "!SCC_PHASE!"=="OFFLINE" echo    -- 6b: ESET Online Scanner --
 set /p GO="    Launch ESET Online Scanner? [Y/n] "
 set "SCC_ESET_STATE=Skipped"
 if /i not "%GO%"=="n" (
@@ -350,6 +353,9 @@ if /i not "%GO%"=="n" (
     )
 )
 set GO=
+
+rem Malwarebytes is not staged by Get-AVTools: do not install/download offline.
+if /i "!SCC_PHASE!"=="OFFLINE" goto :after_scanners
 
 rem ---- Step 6c: Malwarebytes (winget, then official offline fallback) -----
 echo.

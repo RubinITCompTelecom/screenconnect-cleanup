@@ -3,6 +3,11 @@
 Semantic versions. The deploy zip is named `screenconnect-cleanup-v<VER>.zip`
 and carries a `VERSION` file so each build is self-identifying.
 
+## [1.8.12-gui-alpha.7] - 2026-11-17 - Offline staged scanners and persistence selection (ALPHA)
+- Persistence cleanup uses unchecked candidate checkboxes with complete target, command and reason details; the final typed confirmation shows all selected entries.
+- Offline mode offers already-staged KVRT and ESET after ScreenConnect removal in both the GUI and batch launcher. Missing scanners are skipped; staging, Malwarebytes installation and upload remain outside Offline mode.
+- Other remote-access products use a shorter heading in the findings panel.
+
 ## [1.8.12-gui-alpha.6] - 2026-11-16 - Reviewed cleanup and GUI integration (ALPHA)
 **ALPHA prerelease.** Combines the reviewed cleanup repairs with the GUI Online cleanup-first fix.
 Existing releases, their assets/tags and the Latest selection are preserved. Live elevated VM acceptance

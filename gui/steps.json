@@ -59,7 +59,7 @@
     },
     {
       "Id": "6a", "Title": "Scanner: KVRT", "Group": "Scanners",
-      "Phases": ["ALL", "ONLINE"],
+      "Phases": ["ALL", "OFFLINE", "ONLINE"],
       "Calls": [
         { "Script": "Invoke-GUIScanner.ps1", "Args": ["-Scanner", "KVRT", "-ResultPath", "{RunRoot}\\logs\\scanner-KVRT-result.json"], "Before": "EnsureLogsDir",
           "Ask": "Scanners", "When": ["Answer:ScanKvrt"], "SkipText": "Skipped by the technician.",
@@ -69,7 +69,7 @@
     },
     {
       "Id": "6b", "Title": "Scanner: ESET Online Scanner", "Group": "Scanners",
-      "Phases": ["ALL", "ONLINE"],
+      "Phases": ["ALL", "OFFLINE", "ONLINE"],
       "Calls": [
         { "Script": "Invoke-GUIScanner.ps1", "Args": ["-Scanner", "ESET", "-ResultPath", "{RunRoot}\\logs\\scanner-ESET-result.json"], "Before": "EnsureLogsDir",
           "Ask": "Scanners", "When": ["Answer:ScanEset"], "SkipText": "Skipped by the technician.",

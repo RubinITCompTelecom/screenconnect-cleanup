@@ -13,7 +13,7 @@
   network, no C:\RIT-SCC (run folders go to a temp directory). Needs no admin.
 
   Checks:
-    OFFLINE  runs the local steps only, never touches downloads / scanners / AV
+    OFFLINE  runs local steps and staged KVRT/ESET, never downloads or uninstalls AV
              uninstall, builds the package with -NoUpload, writes phase-offline.json
     ONLINE   continues that run: stages, runs the 3 scanners, shares WITHOUT
              -NoUpload using the offline run's findings, runs none of the local steps
@@ -214,13 +214,15 @@ try {
     $h = New-Harness 'main' ''
     $off = Invoke-Launcher $h 'START-HERE-OFFLINE.bat' $answersFull 'offline'
     Check (-not $off.Timeout) 'offline launcher finished (no hang)'
-    foreach ($s in 'Get-ToolPack.ps1', 'Get-AVTools.ps1', 'Invoke-GUIScanner.ps1', 'Invoke-AVUninstaller.ps1') {
+    foreach ($s in 'Get-ToolPack.ps1', 'Get-AVTools.ps1', 'Invoke-AVUninstaller.ps1') {
         Check (-not (Has $off $s)) ('offline never runs ' + $s)
     }
     foreach ($s in 'preflight.ps1', 'detect-remote-access.ps1', 'Invoke-ReviewAndRemove.ps1', 'Invoke-PersistenceScan.ps1', 'diff-snapshots.ps1', 'New-InvestigationReport.ps1', 'Submit-ConnectWiseReport.ps1') {
         Check (Has $off $s) ('offline runs ' + $s)
     }
     Check ((CountOf $off 'collect-snapshot.ps1') -eq 2) 'offline takes the before and after snapshots'
+    $offlineScans = @($off.Trace | Where-Object { $_ -like 'Invoke-GUIScanner.ps1|*' })
+    Check ($offlineScans.Count -eq 2 -and ($offlineScans -join ' ') -notmatch '-Scanner Malwarebytes') 'offline launches staged KVRT and ESET without Malwarebytes installation'
     # Real-PC finding 2026-11-09: preflight hard-failed on the missing Sysinternals pack, which the offline half never downloads.
     $perOff = @($off.Trace | Where-Object { $_ -like 'Invoke-PersistenceScan.ps1|*' })[0]
     Check ($perOff -like '*-InventorySectionTimeoutSeconds 240*') 'offline gives the persistence inventory write more time'

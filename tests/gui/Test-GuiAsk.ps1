@@ -83,9 +83,32 @@ try {
     $seen = Invoke-Walk $s $yes
     $txt = $seen -join ' '
     # (8c, the diff, is skipped here: this walk runs no scripts, so no after-snapshot exists.)
-    Check ($txt -match '^2 3 4 ASK:KeepSelection@5 5 6d ASK:OpenReview@6e 6e ASK:PowerRepair@8a 8a 8b (8c )?9a 9a 9b 9c M$') ('order: ' + $txt)
+    Check ($txt -match '^2 3 4 ASK:KeepSelection@5 5 ASK:Scanners@6a (6a )?(6b )?6d ASK:OpenReview@6e 6e ASK:PowerRepair@8a 8a 8b (8c )?9a 9a 9b 9c M$') ('order: ' + $txt)
+    Check (@($s.Plan | Where-Object { $_.StepId -eq '6c' }).Count -eq 0) 'offline never plans the Malwarebytes installer'
     $five = @($s.Results | Where-Object { $_.StepId -eq '5' })[0]
     Check ($null -ne $five) 'step 5 ran after its question'
+
+    # Scanner availability gates the offline actions even without a window.
+    foreach ($available in @('none', 'KVRT', 'ESET', 'both')) {
+        $fixture = Join-Path $work ('staged-' + $available)
+        $av = Join-Path $fixture 'tools\AV'
+        $null = New-Item -ItemType Directory -Path $av -Force
+        Set-Content -LiteralPath (Join-Path $fixture 'Invoke-GUIScanner.ps1') -Value '# never executed'
+        if ($available -in 'KVRT','both') { Set-Content -LiteralPath (Join-Path $av 'KVRT.exe') -Value 'fixture' }
+        if ($available -in 'ESET','both') { Set-Content -LiteralPath (Join-Path $av 'esetonlinescanner.exe') -Value 'fixture' }
+        $staged = New-GuiSession -Mode Offline -ToolRoot $fixture -RitRoot $fixture
+        $staged.RunRoot = $fixture
+        $staged.Plan = @($staged.Plan | Where-Object { $_.StepId -in '6a','6b','6c' })
+        $launched = @()
+        while ($null -ne ($next = Get-GuiNextAction -Session $staged)) {
+            $launched += $next.StepId
+            Check ([IO.Path]::GetFileName($next.ScriptPath) -eq 'Invoke-GUIScanner.ps1') 'offline uses the existing signature-checking scanner wrapper'
+            [void](Complete-GuiAction -Session $staged -Action $next -ExitCode 0)
+        }
+        $expected = switch ($available) { 'none' { '' }; 'KVRT' { '6a' }; 'ESET' { '6b' }; 'both' { '6a,6b' } }
+        Check (($launched -join ',') -ceq $expected) ('offline runs only available staged scanners: ' + $available)
+        Check (@($staged.Results | Where-Object { $_.Message -match 'not staged' }).Count -eq (2 - $launched.Count)) 'missing staged scanners are explicitly recorded'
+    }
 
     Write-Host 'The answers become the batch file''s arguments' -ForegroundColor Cyan
     $s = New-Walk 'Offline' -Interactive

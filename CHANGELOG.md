@@ -3,6 +3,11 @@
 Semantic versions. The deploy zip is named `screenconnect-cleanup-v<VER>.zip`
 and carries a `VERSION` file so each build is self-identifying.
 
+## [1.8.13-beta.1] - 2026-11-17 - Latest beta release
+- Promotes the GUI Alpha 10 code, whose hosted Windows CI passed, to the Latest beta download. Runtime code is unchanged by this version promotion.
+- Includes persistence candidate checkboxes, staged Offline KVRT (ESET and Malwarebytes installation remain Online-only), explicit Online continuation/cancellation choices, fresh Online attempt folders and current-report sharing guards.
+- Earlier releases remain available. Live elevated Windows acceptance remains outstanding.
+
 ## [1.8.12-gui-alpha.10] - 2026-11-17 - Preserve repeated Online attempts and current report evidence (ALPHA)
 - Each Online run reserves a fresh locked attempt folder: `after-scans`, then `after-scans-2`, and so on. Scanner results/summaries, persistence evidence and GUI logs/session state are kept per attempt, preserving Offline results and interrupted Online evidence.
 - Online reports have matching unique names. Report generation includes current missing/incomplete persistence evidence instead of silently sharing the Offline report. A failed report build prevents sharing, even if a partial file exists.

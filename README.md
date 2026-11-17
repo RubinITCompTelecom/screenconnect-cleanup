@@ -1,8 +1,9 @@
 # ScreenConnect Cleanup
 
-**ALPHA: 1.8.12-gui-alpha.10.** This GUI build is for testing; live elevated Windows acceptance
-is still required. Download it from the [separate alpha prerelease](https://github.com/pupontech/screenconnect-cleanup/releases/tag/v1.8.12-gui-alpha.10).
-Existing releases remain available. The installer command below continues to download GitHub's current Latest release.
+**BETA: 1.8.13-beta.1.** Download the [Latest beta release](https://github.com/pupontech/screenconnect-cleanup/releases/tag/v1.8.13-beta.1).
+Includes the reviewed cleanup repairs, persistence selection checkboxes, staged KVRT in Offline mode,
+clear Online continuation choices and preserved Online attempts. Live elevated Windows acceptance
+is still required. Existing releases remain available; the installer command below downloads GitHub's Latest release.
 
 A Windows technician tool for PCs where a scammer got remote access through ScreenConnect. It usually
 gets there from an **invite email the user clicked** (a fake invoice, meeting or "document shared with

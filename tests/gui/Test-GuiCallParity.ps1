@@ -27,7 +27,8 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
-$work = Join-Path $env:TEMP ('scc-gui-parity-' + [guid]::NewGuid().ToString('N'))
+# Always exercise a valid dot-segment path, including on canonical-TEMP hosts.
+$work = Join-Path (Join-Path $env:TEMP '.') ('scc-gui-parity-' + [guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Path $work -Force
 $script:Failures = New-Object System.Collections.ArrayList
 $script:Passes = 0

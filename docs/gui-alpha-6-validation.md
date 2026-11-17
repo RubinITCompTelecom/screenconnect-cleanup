@@ -63,6 +63,15 @@ matching the identity format contract. The failure was reproduced locally with
 a TEMP path containing a dot segment, then verified fixed in both shells under
 normal and dot-segment TEMP paths. Production hashing code is unchanged.
 
+The next hosted run reached the final GUI/batch parity suite. Its shared harness
+also retained noncanonical TEMP roots while discovered findings paths were
+canonical, producing false trace differences and a false handoff mismatch. The
+harness now normalizes all three fixture roots. The parity suite deliberately
+uses a dot-segment TEMP path to retain this boundary coverage. Runtime code is
+unchanged by these hosted-CI fixture corrections.
+The corrected local parity run passed all 62 assertions, including offline-run
+handoff and the tool folder containing spaces and parentheses.
+
 ## Backup and publication
 
 Before merging, the repository's complete refs were saved in a verified Git

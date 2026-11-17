@@ -95,16 +95,18 @@ function Disable-ReportOpen {
 
 function New-Harness {
     param([string]$Name, [string]$BatPath)
-    $dir = Join-Path $work $Name
+    # Enumeration returns normalized paths; fixture roots must use the same form.
+    $fixtureRoot = [IO.Path]::GetFullPath($work)
+    $dir = Join-Path $fixtureRoot $Name
     $null = New-Item -ItemType Directory -Path $dir -Force
     # Local agent checkouts are not tool payload and may contain other copies
     # of the scripts. Keep them out of the fixture and recursive stub searches.
     Get-ChildItem -LiteralPath $ToolRoot | Where-Object { $_.Name -notin @('.git', '.claude', '.agents') } |
         Copy-Item -Destination $dir -Recurse -Force
     # drop anything that is not part of the tool (an old test harness, etc.)
-    $ritRoot = Join-Path $work ($Name + '-rit-scc')
+    $ritRoot = Join-Path $fixtureRoot ($Name + '-rit-scc')
     $null = New-Item -ItemType Directory -Path $ritRoot -Force
-    $deskDir = Join-Path $work ($Name + '-desktop')
+    $deskDir = Join-Path $fixtureRoot ($Name + '-desktop')
     $null = New-Item -ItemType Directory -Path $deskDir -Force
     foreach ($ps in @(Get-ChildItem -Path $dir -Filter '*.ps1' -Recurse -File)) {
         if ($ps.Name -in @('Find-OfflineRun.ps1', 'Write-PhaseMarker.ps1')) { continue }

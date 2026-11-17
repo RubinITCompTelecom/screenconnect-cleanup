@@ -21,10 +21,14 @@ try {
     $rows = @()
     $identity = Get-PathIdentityHash -Path $work -FileHashes ([ref]$rows)
     if ($script:reads -ne 2 -or $rows.Count -ne 2) { throw 'Source files must be read once for identity and sidecar evidence.' }
+    # The identity contract uses an absolute normalized root. TEMP can contain
+    # dot segments; using its raw string length slices a different relative path.
+    $identityRoot = [IO.Path]::GetFullPath($work).TrimEnd([char[]]@([char]92,[char]47))
     $expectedLines = foreach ($row in $rows) {
         $actual = (Get-FileHash -LiteralPath $row.Path -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($row.SHA256 -ne $actual -or $row.Length -ne (Get-Item -LiteralPath $row.Path).Length) { throw 'Sidecar evidence differs from file bytes.' }
-        $relative = $row.Path.Substring($work.Length).TrimStart('\').ToLowerInvariant()
+        if (-not $row.Path.StartsWith(($identityRoot+'\'),[StringComparison]::OrdinalIgnoreCase)) { throw ('Evidence path is outside normalized fixture root: '+$row.Path+'; root: '+$identityRoot) }
+        $relative = $row.Path.Substring($identityRoot.Length).TrimStart('\').ToLowerInvariant()
         $relative + '|' + $row.Length + '|' + $actual
     }
     $expected = Get-Sha256Hex -Text ('directory`n' + (($expectedLines | Sort-Object) -join "`n"))

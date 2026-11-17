@@ -57,6 +57,12 @@ The initial window run exposed the unticked-sharing failure in cleanup-first
 mode. Its raw log remains under `%TEMP%/scc-alpha-integration-tests-20261116-165839`.
 The final fresh run above includes the corrected session state and report args.
 
+Hosted CI subsequently exposed a quarantine test-path mismatch. The independent
+expected identity now normalizes the fixture root before deriving relative paths,
+matching the identity format contract. The failure was reproduced locally with
+a TEMP path containing a dot segment, then verified fixed in both shells under
+normal and dot-segment TEMP paths. Production hashing code is unchanged.
+
 ## Backup and publication
 
 Before merging, the repository's complete refs were saved in a verified Git

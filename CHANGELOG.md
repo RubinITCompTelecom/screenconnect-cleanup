@@ -3,6 +3,12 @@
 Semantic versions. The deploy zip is named `screenconnect-cleanup-v<VER>.zip`
 and carries a `VERSION` file so each build is self-identifying.
 
+## [1.8.12-gui-alpha.10] - 2026-11-17 - Preserve repeated Online attempts and current report evidence (ALPHA)
+- Each Online run reserves a fresh locked attempt folder: `after-scans`, then `after-scans-2`, and so on. Scanner results/summaries, persistence evidence and GUI logs/session state are kept per attempt, preserving Offline results and interrupted Online evidence.
+- Online reports have matching unique names. Report generation includes current missing/incomplete persistence evidence instead of silently sharing the Offline report. A failed report build prevents sharing, even if a partial file exists.
+- The GUI persistence summary, Open report button and Desktop refresh refer to the current Online attempt. Skipping every antivirus scan is explicitly logged.
+- Batch and GUI launchers use the same directory reservation and sharing rules. Persistence overwrite protection remains enabled.
+
 ## [1.8.12-gui-alpha.9] - 2026-11-17 - Explain Online continuation choices (ALPHA)
 - The Online continuation dialog explains using the completed Offline evidence versus starting separate scans, including report/sharing behavior and optional KVRT reruns. Neither choice repeats ScreenConnect detection or removal.
 - Cancel and closing the continuation dialog start nothing; closing previously continued the Offline run automatically.

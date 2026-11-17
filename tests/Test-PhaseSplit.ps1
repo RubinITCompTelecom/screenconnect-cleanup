@@ -306,6 +306,27 @@ try {
     }
     Check (-not ($on.Out -match 'STEP \d+[a-e]?/9')) 'online shows no 1-9 step numbers'
 
+    # ------------------------------------------------------------------ repeated ONLINE and failed report
+    Write-Host 'ONLINE repeat preserves earlier evidence' -ForegroundColor Cyan
+    $oldReport = Join-Path $runs[0].FullName 'report-after-scans.html'
+    'earlier online report sentinel' | Set-Content -LiteralPath $oldReport -Encoding ASCII
+    $repeat = Invoke-Launcher $h 'START-HERE-ONLINE.bat' $answersFull 'online-repeat'
+    Check (-not $repeat.Timeout) 'repeated Online launcher finishes'
+    $perRepeat = @($repeat.Trace | Where-Object { $_ -like 'Invoke-PersistenceScan.ps1|*' })
+    Check ($perRepeat.Count -eq 1 -and $perRepeat[0] -like '*\after-scans-2 -PreflightRoot*') 'repeated Online persistence uses a fresh attempt'
+    $sharedRepeat = @($repeat.Trace | Where-Object { $_ -like 'Submit-ConnectWiseReport.ps1|*' })
+    Check ($sharedRepeat.Count -eq 1 -and $sharedRepeat[0] -like '*report-after-scans-2.html*' -and $sharedRepeat[0] -like '*after-scans-2\persistence\result.json*') 'repeated Online shares only its own report and evidence'
+    Check (([IO.File]::ReadAllText($oldReport)).Trim() -eq 'earlier online report sentinel') 'repeated Online leaves the earlier report unchanged'
+    $failingReport = @'
+Add-Content -LiteralPath $env:SCC_TRACE -Value ('New-InvestigationReport.ps1|' + ($args -join ' ')) -Encoding ASCII
+exit 1
+'@
+    Set-Content -LiteralPath (Join-Path $h.Dir 'New-InvestigationReport.ps1') -Value $failingReport -Encoding ASCII
+    $failedReportRun = Invoke-Launcher $h 'START-HERE-ONLINE.bat' $answersFull 'online-report-failed'
+    Check (-not $failedReportRun.Timeout -and -not (Has $failedReportRun 'Submit-ConnectWiseReport.ps1')) 'failed current Online report prevents sharing the older Offline report'
+    Check ($failedReportRun.Out -like '*nothing will be shared*') 'batch report failure explains that nothing was shared'
+    Set-Content -LiteralPath (Join-Path $h.Dir 'New-InvestigationReport.ps1') -Value $stubText -Encoding ASCII
+
     # ------------------------------------------------------------------ ONLINE with no prior run
     Write-Host 'ONLINE half (no offline run on this PC)' -ForegroundColor Cyan
     $h2 = New-Harness 'noprior' ''

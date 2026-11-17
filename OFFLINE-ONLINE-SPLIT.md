@@ -59,6 +59,20 @@ does (a scanner can remove or reveal startup items). That second pass goes to
 rebuilt from it as `report-after-scans.html`, and that is what gets shared. The
 offline `report.html` stays as it was.
 
+Every Online attempt reserves a fresh locked folder. If `after-scans` already
+exists (even from an interrupted attempt), the next attempt uses `after-scans-2`,
+then `after-scans-3`, and so on. Its scanner logs, `scanner_results.json`,
+persistence artifacts and GUI log/session file stay inside that attempt folder.
+The report uses the matching name (`report-after-scans-2.html`, for example).
+Offline scanner results and earlier Online reports/evidence remain unchanged.
+The GUI summary and Open report button show the current attempt.
+
+Missing or incomplete current persistence evidence is shown in the new report.
+If that report cannot be generated successfully, nothing is shared; an older
+Offline or Online report is never substituted. Skipping every scanner still
+runs persistence review and the remaining selected Online steps; the GUI logs
+explicitly that no antivirus scan was selected.
+
 When the offline half finishes it writes `phase-offline.json` into its run
 folder (`C:\RIT-SCC\<PC>-<id>`). The online half looks for the newest such
 folder for this PC, shows it, and asks `Continue that run? [Y/n]`. It then

@@ -739,7 +739,7 @@ function Update-HeaderButtons {
     $ui.BtnOpenRun.IsEnabled = [bool]$has
     $ui.BtnOpenLog.IsEnabled = [bool]($script:LogPath -and (Test-Path -LiteralPath $script:LogPath))
     $rep = $false
-    if ($has) { $rep = (Get-GuiReportInfo -RunRoot $script:Session.RunRoot).ReportExists }
+    if ($has) { $rep = Test-Path -LiteralPath (Expand-GuiTokens -Session $script:Session -Text '{ShareReport}') -PathType Leaf }
     $ui.BtnOpenReport.IsEnabled = [bool]$rep
 }
 
@@ -784,6 +784,7 @@ function Resolve-Ask {
                 -Buttons @(@{ Text = 'Start the selected scans'; Value = 'go' }, @{ Text = 'Skip all scans'; Value = 'skip' })
             $vals = @{ ScanKvrt = $false; ScanEset = $false; ScanMalwarebytes = $false }
             if ($r -and $r.Value -eq 'go') { foreach ($k in @($vals.Keys)) { $vals[$k] = [bool]$r.Checks[$k] } }
+            if (-not ($vals.ScanKvrt -or $vals.ScanEset -or $vals.ScanMalwarebytes)) { Add-ConsoleNote 'No antivirus scans selected. Continuing to persistence review and the remaining steps.' }
             Set-GuiAnswer -Session $sess -Ask 'Scanners' -Values $vals
             return $true
         }
@@ -894,7 +895,7 @@ function Start-Run {
     Initialize-Stepper $sess.Plan $ModeName
     $script:LogPath = ''
     if ($run) {
-        $logs = Join-Path $run 'logs'
+        $logs = Join-Path (Expand-GuiTokens -Session $sess -Text '{ScanWorkDir}') 'logs'
         if (-not (Test-Path -LiteralPath $logs)) { $null = New-Item -ItemType Directory -Path $logs -Force }
         $script:LogPath = Join-Path $logs 'gui-console.log'
     }
@@ -910,6 +911,7 @@ function Start-Run {
     $ui.RunText.Text = $(if ($run) { 'Run folder: ' + $run } else { 'Run folder: none (this mode creates none)' })
     Show-Panel 'Run'
     Add-ConsoleNote ($label + $(if ($run) { '. Run folder: ' + $run } else { '' }))
+    if ($sess.OnlineWorkDir) { Add-ConsoleNote ('This Online attempt: ' + $sess.OnlineWorkDir) }
     if ($sess.ScannerOnly) { Add-ConsoleNote 'No offline-half run is being continued: this is a scanner-only run. There is no report to share from it.' }
     Save-Session
     Update-Stepper
@@ -1103,8 +1105,7 @@ function Show-RunSummary {
     [void]$ui.CardsHost.Children.Add($head)
 
     if ($planIds -contains '6d' -and $Sess.RunRoot) {
-        $sub = $(if ($Sess.Phase -eq 'ONLINE') { 'after-scans\persistence' } else { 'persistence' })
-        $pv = Get-GuiPersistenceView -RunRoot $Sess.RunRoot -SubDir $sub
+        $pv = Get-GuiPersistenceView -RunRoot (Expand-GuiTokens -Session $Sess -Text '{PersistWorkDir}')
         if (-not $pv.Available) { Add-SummaryLine 'Persistence check' ('not available (' + $pv.Error + ')') 'WarningFg' }
         else {
             $st = $pv.Status + $(if ($pv.RunStatus -and $pv.RunStatus -ne $pv.Status) { ', review ' + $pv.RunStatus } else { '' })
@@ -1355,7 +1356,7 @@ $ui.BtnRestart.add_Click({
     })
 $ui.BtnOpenRitRoot.add_Click({ if (Test-Path -LiteralPath $RitRoot -PathType Container) { Start-Process -FilePath 'explorer.exe' -ArgumentList ('"' + $RitRoot + '"') } })
 $ui.BtnOpenRun.add_Click({ if ($script:Session -and $script:Session.RunRoot) { Start-Process -FilePath 'explorer.exe' -ArgumentList ('"' + $script:Session.RunRoot + '"') } })
-$ui.BtnOpenReport.add_Click({ if ($script:Session) { $r = (Get-GuiReportInfo -RunRoot $script:Session.RunRoot); if ($r.ReportExists) { Start-Process -FilePath $r.ReportPath } } })
+$ui.BtnOpenReport.add_Click({ if ($script:Session) { $path = Expand-GuiTokens -Session $script:Session -Text '{ShareReport}'; if (Test-Path -LiteralPath $path -PathType Leaf) { Start-Process -FilePath $path } } })
 $ui.BtnOpenLog.add_Click({ if ($script:LogPath -and (Test-Path -LiteralPath $script:LogPath)) { Start-Process -FilePath 'notepad.exe' -ArgumentList ('"' + $script:LogPath + '"') } })
 $ui.BtnCopy.add_Click({ try { [System.Windows.Clipboard]::SetText($ui.ConsoleBox.Text) } catch { } })
 

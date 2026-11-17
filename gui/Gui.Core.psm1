@@ -90,6 +90,8 @@ function New-GuiSession {
     $merged = @{
         ScanKvrt = $true; ScanEset = $true; ScanMalwarebytes = $true; OpenReview = $true
         Avu = $false; PowerRepair = $false; ResetGpo = $false
+        # Online half: share the sanitized report to MicroBin (the window's tick box, ticked by default).
+        ShareReport = $true
         KeepIdentifiers = @()
     }
     if ($Answers) { foreach ($k in $Answers.Keys) { $merged[$k] = $Answers[$k] } }
@@ -103,8 +105,11 @@ function New-GuiSession {
             if ($callPhases -and @($callPhases.Value) -notcontains $phase) { continue }
             $destructive = $false
             if ($step.PSObject.Properties['Destructive']) { $destructive = [bool]$step.Destructive }
+            # The online share step reads differently when the technician unticked sharing ("TitleNoShare").
+            $title = [string]$step.Title
+            if (-not [bool]$merged['ShareReport'] -and $step.PSObject.Properties['TitleNoShare']) { $title = [string]$step.TitleNoShare }
             [void]$plan.Add([pscustomobject]@{
-                    StepId = [string]$step.Id; StepTitle = [string]$step.Title; Group = [string]$step.Group
+                    StepId = [string]$step.Id; StepTitle = $title; Group = [string]$step.Group
                     Destructive = $destructive; Call = $call
                 })
         }
@@ -114,7 +119,9 @@ function New-GuiSession {
         Mode = $Mode; Phase = $phase; ToolRoot = $root; RitRoot = $RitRoot; ComputerName = $ComputerName
         RunRoot = ''; FindingsJson = ''; PriorFindings = ''
         PipeRc = 0; PowerRepairRan = $false; ReportRc = 0; ReportOpened = $false
-        ScannerOnly = $false; Shared = $false; ShareReport = ''; SharePDir = ''
+        # Shared = the report was really uploaded; ShareBuilt = the share step ran clean (with or without
+        # the upload), so the Desktop copy is refreshed either way (batch :online_share refreshes on exit 0).
+        ScannerOnly = $false; Shared = $false; ShareBuilt = $false; ShareReport = ''; SharePDir = ''
         Answers = $merged
         Interactive = [bool]$Interactive; Asked = @{}
         Plan = $plan; Index = 0
@@ -262,7 +269,9 @@ function Resolve-GuiListToken {
             if (Test-Path -LiteralPath $k -PathType Leaf) { $out += @('-KeptInstances', $k) }
             return $out
         }
-        'SubmitArgs'    { if ($phase -eq 'OFFLINE') { return @('-NoUpload') }; return @() }
+        'SubmitArgs'    { if ($phase -eq 'OFFLINE' -or -not [bool]$Session.Answers['ShareReport']) { return @('-NoUpload') }; return @() }
+        # Online share step: the technician unticked "Share the sanitized report" -> build the package, upload nothing.
+        'ShareArgs'     { if (-not [bool]$Session.Answers['ShareReport']) { return @('-NoUpload') }; return @() }
         'KeepArgs' {
             $ids = @($Session.Answers['KeepIdentifiers'] | Where-Object { $_ })
             if ($ids.Count -gt 0) { return @('-KeepIdentifier', ($ids -join ',')) }
@@ -277,6 +286,30 @@ function Resolve-GuiListToken {
             $f = $Session.RunRoot + '/removal-manifest.json'
             if (Test-Path -LiteralPath $f -PathType Leaf) { return @('-RemovalManifest', $f) }
             return @()
+        }
+        # Report evidence flags (batch SCC_POWER_ARG / SCC_SCAN_ARG): the repair result only when the
+        # repair left one (declined = section omitted), and scanner status = Malwarebytes result or "skipped".
+        'PowerArg'   { $f = $Session.RunRoot + '/power-options-repair.json';  if (Test-Path -LiteralPath $f -PathType Leaf) { return @('-PowerOptionsRepair', $f) }; return @() }
+        'PowerArgBs' { $f = $Session.RunRoot + '\power-options-repair.json'; if (Test-Path -LiteralPath $f -PathType Leaf) { return @('-PowerOptionsRepair', $f) }; return @() }
+        'ScannerArgs' {
+            $f = $Session.RunRoot + '\scanner_results.json'
+            if (Test-Path -LiteralPath $f -PathType Leaf) { return @('-ScannerSummary', $f) }
+            return @() # missing evidence is unknown, not proof that every scan was skipped
+        }
+        'ScannerStateArgs' {
+            $out = @()
+            foreach ($pair in @(@('6a','-KvrtState'),@('6b','-EsetState'),@('6c','-MalwarebytesState'))) {
+                $r = @($Session.Results | Where-Object { $_.StepId -eq $pair[0] } | Select-Object -Last 1)
+                $state = 'NotRun'
+                if ($r.Count) {
+                    if ($r[0].Message -match 'not staged') { $state = 'NotStaged' }
+                    elseif ($r[0].Status -eq 'Skipped') { $state = 'Skipped' }
+                    elseif ($null -eq $r[0].ExitCode) { $state = 'Exit:3' }
+                    else { $state = 'Exit:' + [int]$r[0].ExitCode }
+                }
+                $out += @($pair[1], $state)
+            }
+            return $out
         }
         'GpoArgs' { if ([bool]$Session.Answers['ResetGpo']) { return @('-ResetLocalGpo') }; return @() }
         'ReportArg' {
@@ -532,16 +565,24 @@ function Complete-GuiAction {
                     $status = 'Warn'; $text = 'Report was not produced.'
                 }
             }
-            'MarkShared' { $Session.Shared = ($ExitCode -eq 0) }
+            'MarkShared' {
+                $Session.ShareBuilt = ($ExitCode -eq 0)
+                $Session.Shared = (($ExitCode -eq 0) -and [bool]$Session.Answers['ShareReport'])
+                if ($ExitCode -eq 0 -and -not [bool]$Session.Answers['ShareReport']) { $text = 'Report package built on this PC; nothing was uploaded (sharing is unticked).' }
+            }
             'MarkAfterScansReport' {
                 # Like the batch file: the exit code is not checked, only whether the file exists.
                 $f = $Session.RunRoot + '\report-after-scans.html'
                 if (Test-Path -LiteralPath $f -PathType Leaf) {
                     $Session.ShareReport = $f
                     $Session.SharePDir = $Session.RunRoot + '\after-scans\persistence'
-                    $status = 'Done'; $text = 'Sharing report-after-scans.html. The offline report.html is kept unchanged.'
+                    $status = 'Done'
+                    if ([bool]$Session.Answers['ShareReport']) { $text = 'Sharing report-after-scans.html. The offline report.html is kept unchanged.' }
+                    else { $text = 'Built report-after-scans.html (kept on this PC; sharing is unticked). The offline report.html is kept unchanged.' }
                 } else {
-                    $status = 'Warn'; $text = 'Could not build the after-scans report - sharing the offline report instead.'
+                    $status = 'Warn'
+                    if ([bool]$Session.Answers['ShareReport']) { $text = 'Could not build the after-scans report - sharing the offline report instead.' }
+                    else { $text = 'Could not build the after-scans report - the offline report is kept as it is.' }
                 }
             }
             default { throw ('Unknown after-hook: ' + $after) }
@@ -734,6 +775,14 @@ function Send-GuiAnswer {
     $Child.LastOutputUtc = (Get-Date).ToUniversalTime()
 }
 
+function Test-GuiScanAction {
+    # Only our collectors/analysis are controllable. Vendor AV and approved
+    # removal/uninstall work keep their existing attended/close-lock behavior.
+    param($Action, [bool]$CloseLock = $false)
+    if (-not $Action -or $CloseLock -or $Action.Kind -ne 'Run' -or $Action.Destructive) { return $false }
+    return ([IO.Path]::GetFileName([string]$Action.ScriptPath) -in @('collect-snapshot.ps1','detect-remote-access.ps1','Invoke-PersistenceScan.ps1','diff-snapshots.ps1'))
+}
+
 function Stop-GuiChild {
     # Ends a running step. By default the whole tree goes (a read-only step's helpers have no reason
     # to outlive it). -KeepDescendants ends only the step's own powershell.exe: closing the window
@@ -782,11 +831,23 @@ function Test-GuiPromptMatch {
     return $false
 }
 
+function Test-GuiQuestionLike {
+    # Preserve the generic fallback for any unfamiliar prompt. Suppress only
+    # recognized progress tails; punctuation is not a reliable input contract.
+    param([string]$Text)
+    $t = ([string]$Text).Trim()
+    if ($t -eq '') { return $false }
+    if ($t -match '^\[snapshot\s+[^\]]+\]\s+\d+/\d+\s+sections,\s+\d+s elapsed$') { return $false }
+    if ($t -match '^\d+(?:\.\d+)?%$' -or $t -eq 'Collecting processes...') { return $false }
+    return $true
+}
+
 function Get-GuiPendingPrompt {
     # Looks at the UNFINISHED output line (the prompt is printed with -NoNewline). Known
     # prompts match the table. Anything else that sits unfinished and quiet for 5 seconds
-    # becomes a generic "the tool is waiting for an answer" box (4.3 rule 4). Complete lines
-    # never trigger the generic box, so a long quiet scan does not look like a question.
+    # AND is not recognized progress becomes a generic "the tool is waiting
+    # for an answer" box (4.3 rule 4). Complete lines never trigger the generic box, so a long
+    # quiet scan does not look like a question, and neither does a progress line.
     # A box the technician marked "not a question" stays away for -RepeatSeconds; if the tool
     # is still sitting on the same text after that, it really is waiting, so it comes back
     # (a script blocked on Read-Host would otherwise wait forever).
@@ -799,6 +860,7 @@ function Get-GuiPendingPrompt {
             return [pscustomobject]@{ Kind = 'Known'; Row = $row; Text = $t }
         }
     }
+    if (-not (Test-GuiQuestionLike -Text $t)) { return $null }
     $now = (Get-Date).ToUniversalTime()
     $quiet = ($now - $Child.LastOutputUtc).TotalSeconds
     if ($quiet -lt $QuietSeconds) { return $null }
@@ -819,6 +881,18 @@ function Get-GuiShareUrl {
     foreach ($l in @($Lines)) {
         $m = [regex]::Match([string]$l, '^\s*MICROBIN UPLOAD:\s*(\S+)\s*$')
         if ($m.Success) { return $m.Groups[1].Value }
+    }
+    return ''
+}
+
+function Get-GuiShareSkipped {
+    # Submit-ConnectWiseReport.ps1 prints "MICROBIN UPLOAD: skipped; <reason>" when sharing was asked
+    # for but there is no server to send to (microbin-url.txt empty or missing). Returns the reason,
+    # or '' when no such line is present. "disabled by operator" (-NoUpload) is not a skip.
+    param([string[]]$Lines)
+    foreach ($l in @($Lines)) {
+        $m = [regex]::Match([string]$l, '^\s*MICROBIN UPLOAD:\s*skipped\b;?\s*(.*?)\s*$')
+        if ($m.Success) { if ($m.Groups[1].Value) { return $m.Groups[1].Value }; return 'skipped' }
     }
     return ''
 }
@@ -1004,7 +1078,7 @@ Export-ModuleMember -Function `
     Expand-GuiTokens, Expand-GuiArgs, Test-GuiCondition, Get-GuiNextAction, Set-GuiAnswer, Complete-GuiAction, `
     Get-GuiFinalStatus, Invoke-GuiBuiltin, Find-GuiFindings, `
     Set-GuiConsoleEncoding, Restore-GuiConsoleEncoding, `
-    Start-GuiChild, Update-GuiChild, Send-GuiAnswer, Stop-GuiChild, `
-    Get-GuiPromptTable, Test-GuiPromptMatch, Get-GuiPendingPrompt, Set-GuiPromptDismissed, Get-GuiShareUrl, `
+    Start-GuiChild, Update-GuiChild, Send-GuiAnswer, Stop-GuiChild, Test-GuiScanAction, `
+    Get-GuiPromptTable, Test-GuiPromptMatch, Test-GuiQuestionLike, Get-GuiPendingPrompt, Set-GuiPromptDismissed, Get-GuiShareUrl, Get-GuiShareSkipped, `
     Read-GuiJson, ConvertTo-GuiItems, Get-GuiFindingsView, Get-GuiScannerResult, Get-GuiPersistenceView, Get-GuiDiffView, Get-GuiReportInfo, `
     Save-GuiSession, Get-GuiWindowModes

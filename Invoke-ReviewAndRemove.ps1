@@ -419,7 +419,32 @@ $rc = $LASTEXITCODE
 if ($null -eq $rc) { $rc = 1 }
 
 Write-Line ""
-if ($rc -eq 0) {
+# Instances the engine refused because their identity/signature could not be
+# verified were left installed on purpose. That is never "Removal completed",
+# whatever the exit code says, so read them from the manifest and say so.
+$unverifiedIds = @()
+$manifestFile = Join-Path $WorkDir 'removal-manifest.json'
+if (Test-Path -LiteralPath $manifestFile) {
+    try {
+        $manifestData = Get-Content -LiteralPath $manifestFile -Raw -ErrorAction Stop | ConvertFrom-Json
+        # Assign first: Get-JsonItems returns its list as ONE pipeline object
+        # (return , @(...)), so wrapping the call in @() would nest it.
+        $manifestEntries = Get-JsonItems (Get-Prop $manifestData 'Entries')
+        $unverifiedIds = @($manifestEntries | Where-Object {
+            ([string](Get-Prop $_ 'Action') -eq 'ProductVerification') -and ([string](Get-Prop $_ 'Result') -eq 'PRODUCT_VERIFICATION_FAILED')
+        } | ForEach-Object { [string](Get-Prop $_ 'InstanceId') } | Select-Object -Unique)
+    } catch {
+        Write-Line ("Could not read removal-manifest.json: " + $_.Exception.Message) 'Yellow'
+    }
+}
+
+if ($unverifiedIds.Count -gt 0) {
+    if ($rc -eq 0) { $rc = 1 }
+    Write-Line ("NOT REMOVED: " + $unverifiedIds.Count + " instance(s) could not be verified as ScreenConnect and were left installed:") 'Red'
+    foreach ($id in $unverifiedIds) { Write-Line ("  - " + $id) 'Red' }
+    Write-Line ("Removal is NOT complete (exit " + $rc + "). Check removal-manifest.json / removal-report.txt under:") 'Red'
+    Write-Line ("  " + $WorkDir) 'Red'
+} elseif ($rc -eq 0) {
     Write-Line "Removal completed. Manifest + quarantine are under:" 'Green'
     Write-Line ("  " + $WorkDir) 'Green'
 } else {

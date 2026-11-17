@@ -135,6 +135,17 @@ if ($Verify) {
     exit 0
 }
 
+$script:BitsStallSeconds = 60
+
+function Test-BitsStall {
+    # Pure helper (unit-tested): a BITS job is stalled when its byte count has
+    # not grown for StallSeconds. Returns Progressed (bytes grew) and Stalled.
+    param([long]$Bytes, [long]$LastBytes, [datetime]$LastProgress, [datetime]$Now, [int]$StallSeconds = 60)
+    $progressed = ($Bytes -gt $LastBytes)
+    $stalled = (-not $progressed) -and (($Now - $LastProgress).TotalSeconds -ge $StallSeconds)
+    return [pscustomobject]@{ Progressed = $progressed; Stalled = $stalled }
+}
+
 function Start-DownloadFast {
     # Download helper for the big scanner files (KVRT is ~114 MB):
     # 1. BITS (Start-BitsTransfer, every Windows 10/11) - the OS transfer
@@ -152,9 +163,11 @@ function Start-DownloadFast {
         $progressActivity = "Downloading " + $Label
         $progressVisible = $false
         $progressPreferenceBefore = $ProgressPreference
+        $bitsJobId = $null
         try {
             Say ("  (BITS) " + $Label) 'DarkGray'
             $job = Start-BitsTransfer -Source $Url -Destination $OutFile -DisplayName ('ScreenConnect-Cleanup: ' + $Label) -Asynchronous -ErrorAction Stop
+            $bitsJobId = $job.JobId
             if (-not $Quiet) {
                 # The script suppresses IWR's expensive progress renderer
                 # globally, so explicitly enable the BITS bar locally.
@@ -164,10 +177,17 @@ function Start-DownloadFast {
             }
             $deadline = (Get-Date).AddMinutes(20)
             $sizeUnknown = $true
+            $lastBytes = [long]-1
+            $lastProgress = Get-Date
             do {
                 Start-Sleep -Seconds 1
                 $job = Get-BitsTransfer -JobId $job.JobId -ErrorAction SilentlyContinue
                 if (-not $job) { break }
+                # No byte progress for ~60 s: give up on BITS (the job is
+                # removed in the catch below) and use the fallback downloader.
+                $stall = Test-BitsStall -Bytes ([long]$job.BytesTransferred) -LastBytes $lastBytes -LastProgress $lastProgress -Now (Get-Date) -StallSeconds $script:BitsStallSeconds
+                if ($stall.Progressed) { $lastBytes = [long]$job.BytesTransferred; $lastProgress = Get-Date }
+                elseif ($stall.Stalled) { throw ('BITS stalled: no data for ' + $script:BitsStallSeconds + ' s (state=' + $job.JobState + ')') }
                 if ($job.TotalBytes -gt 0) {
                     $pct = [int][math]::Round(($job.BytesTransferred / $job.TotalBytes) * 100)
                     if ($pct -lt 0) { $pct = 0 }
@@ -196,6 +216,10 @@ function Start-DownloadFast {
             return
         } catch {
             Say ("  BITS failed (" + $_.Exception.Message + ") - falling back to Invoke-WebRequest.") 'Yellow'
+            # Never leave a stuck/failed job behind in the BITS queue.
+            if ($bitsJobId) {
+                try { Get-BitsTransfer -JobId $bitsJobId -ErrorAction SilentlyContinue | Remove-BitsTransfer -ErrorAction SilentlyContinue } catch { }
+            }
             # Remove only the partial transfer target (the .part staging file),
             # never the final staged tool - the anti-clobber contract stands.
             Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue

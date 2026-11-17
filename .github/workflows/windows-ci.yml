@@ -24,7 +24,7 @@ jobs:
       matrix:
         os: [windows-2022, windows-2025]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -285,6 +285,22 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
+      - name: Review repair regressions (Windows PowerShell 5.1, fixtures only)
+        shell: powershell
+        run: |
+          foreach ($test in @('tests/Test-RunRootBaseLock.ps1', 'tests/test_av_uninstaller_product_count.ps1', 'tests/test_av_uninstaller_trust.ps1', 'tests/test_bits_stall.ps1', 'tests/test_clean_persistence.ps1', 'tests/test_detector_report_share_optin.ps1', 'tests/test_msi_uninstall_parsing.ps1', 'tests/test_per_user_state.ps1', 'tests/test_quarantine_hash_evidence.ps1', 'tests/test_review_wrapper_outcome.ps1', 'tests/test_scanner_signature_trust.ps1', 'tests/test_snapshot_admin_sid_pid_map.ps1', 'tests/test_diff_registry_identity.ps1', 'tests/test_user_uninstall_handoff.ps1', 'tests/test_current_profile_redirection.ps1', 'tests/test_scanner_summary_contract.ps1', 'tests/gui/Test-GuiUnknownPrompt.ps1', 'tests/gui/Test-GuiScannerSummary.ps1', 'tests/test_ci_review_regressions.ps1')) {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File $test
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Review repair regressions (pwsh, fixtures only)
+        shell: pwsh
+        run: |
+          foreach ($test in @('tests/Test-RunRootBaseLock.ps1', 'tests/test_av_uninstaller_product_count.ps1', 'tests/test_av_uninstaller_trust.ps1', 'tests/test_bits_stall.ps1', 'tests/test_clean_persistence.ps1', 'tests/test_detector_report_share_optin.ps1', 'tests/test_msi_uninstall_parsing.ps1', 'tests/test_per_user_state.ps1', 'tests/test_quarantine_hash_evidence.ps1', 'tests/test_review_wrapper_outcome.ps1', 'tests/test_scanner_signature_trust.ps1', 'tests/test_snapshot_admin_sid_pid_map.ps1', 'tests/test_diff_registry_identity.ps1', 'tests/test_user_uninstall_handoff.ps1', 'tests/test_current_profile_redirection.ps1', 'tests/test_scanner_summary_contract.ps1', 'tests/gui/Test-GuiUnknownPrompt.ps1', 'tests/gui/Test-GuiScannerSummary.ps1', 'tests/test_ci_review_regressions.ps1')) {
+            pwsh -NoProfile -File $test
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
       - name: Power-options repair contracts (Windows PowerShell 5.1, no live changes)
         shell: powershell
         run: |
@@ -375,6 +391,10 @@ jobs:
       - name: GUI - questions the window asks (Ask mechanism)
         shell: powershell
         run: ./tests/gui/Test-GuiAsk.ps1
+
+      - name: GUI - tool scan pause and stop controls (harmless child fixtures)
+        shell: powershell
+        run: ./tests/gui/Test-GuiScanControls.ps1
 
       - name: GUI - package layout (top launcher in folders with parentheses)
         shell: powershell

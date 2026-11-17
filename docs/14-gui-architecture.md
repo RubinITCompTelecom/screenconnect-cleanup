@@ -233,7 +233,7 @@ Phases and what they skip are exactly the batch file's `SCC_DO_*` switches:
 |---|---|---|
 | Full | `START-HERE.bat` | 1, 2, 3, 4, 5, 6a-c, 6d, 6e, 7, 8, 9 |
 | Offline half | `START-HERE-OFFLINE.bat` | 2 (`-SkipToolPack`), 3, 4, 5, 6d (longer limits), 6e, 8, 9 (`-NoUpload`), then `phase-offline.json` |
-| Online half | `START-HERE-ONLINE.bat` | 1, 6a-c, 7, share, then `phase-online.json`; continues the run found by `tools\Find-OfflineRun.ps1` or does a scanner-only run |
+| Online half | `START-HERE-ONLINE.bat` | 1, 6a-c, 7, share, then `phase-online.json`; continues the run found by `tools\Find-OfflineRun.ps1` or, in the window, asks: cleanup first (the full START-HERE.bat sequence) or a scanner-only run |
 | Stage tools | `STAGE-TOOLS-ONLINE.bat` | downloads only; needs no elevation and no run folder |
 
 What happens after each step is also copied from the batch file, not redesigned:

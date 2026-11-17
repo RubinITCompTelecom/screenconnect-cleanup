@@ -95,13 +95,18 @@ function Disable-ReportOpen {
 
 function New-Harness {
     param([string]$Name, [string]$BatPath)
-    $dir = Join-Path $work $Name
+    # Enumeration returns normalized paths; fixture roots must use the same form.
+    $fixtureRoot = [IO.Path]::GetFullPath($work)
+    $dir = Join-Path $fixtureRoot $Name
     $null = New-Item -ItemType Directory -Path $dir -Force
-    Copy-Item -Path (Join-Path $ToolRoot '*') -Destination $dir -Recurse -Force
+    # Local agent checkouts are not tool payload and may contain other copies
+    # of the scripts. Keep them out of the fixture and recursive stub searches.
+    Get-ChildItem -LiteralPath $ToolRoot | Where-Object { $_.Name -notin @('.git', '.claude', '.agents') } |
+        Copy-Item -Destination $dir -Recurse -Force
     # drop anything that is not part of the tool (an old test harness, etc.)
-    $ritRoot = Join-Path $work ($Name + '-rit-scc')
+    $ritRoot = Join-Path $fixtureRoot ($Name + '-rit-scc')
     $null = New-Item -ItemType Directory -Path $ritRoot -Force
-    $deskDir = Join-Path $work ($Name + '-desktop')
+    $deskDir = Join-Path $fixtureRoot ($Name + '-desktop')
     $null = New-Item -ItemType Directory -Path $deskDir -Force
     foreach ($ps in @(Get-ChildItem -Path $dir -Filter '*.ps1' -Recurse -File)) {
         if ($ps.Name -in @('Find-OfflineRun.ps1', 'Write-PhaseMarker.ps1')) { continue }
@@ -134,6 +139,9 @@ function New-Harness {
     foreach ($b in @(Get-ChildItem -Path $dir -Filter '*.bat' -File)) {
         $raw = [IO.File]::ReadAllText($b.FullName)
         $raw = $raw.Replace('{exit 0}else{exit 1}', '{exit 0}else{exit 0}').Replace('C:\RIT-SCC', $ritRoot)
+        # Keep-awake lifetime has its own runtime test. Its asynchronous stub
+        # otherwise inherits redirected output and races fixture reads.
+        $raw = [regex]::Replace($raw, '(?m)^start "" powershell.exe [^\r\n]*Keep-Awake\.ps1"[ \t]*\r?$', 'rem [test] keep-awake covered separately')
         # The report copy goes to the Desktop: point it at a temp folder, never the real one.
         $raw = $raw.Replace("[Environment]::GetFolderPath('Desktop')", "'" + $deskDir + "'")
         if ($b.Name -eq 'START-HERE.bat') { $raw = Disable-ReportOpen $raw }
@@ -165,7 +173,18 @@ function Invoke-Launcher {
     # Keep-Awake is started asynchronously by the batch, so its line has no stable position.
     $lines = @(Get-Content -LiteralPath $trace | Where-Object { $_ -and $_ -notlike 'Keep-Awake.ps1|*' })
     $outText = ''
-    if (Test-Path -LiteralPath $out) { $outText = [IO.File]::ReadAllText($out) }
+    if (Test-Path -LiteralPath $out) {
+        # The asynchronous keep-awake stub can briefly retain the redirected
+        # output handle after cmd exits. Wait for that writer before reading.
+        $readDeadline = [DateTime]::UtcNow.AddSeconds(15)
+        while ($true) {
+            try { $outText = [IO.File]::ReadAllText($out); break }
+            catch [IO.IOException] {
+                if ([DateTime]::UtcNow -ge $readDeadline) { throw }
+                Start-Sleep -Milliseconds 100
+            }
+        }
+    }
     return [pscustomobject]@{ Timeout = $false; Exit = $p.ExitCode; Trace = $lines; Out = $outText }
 }
 

@@ -1,7 +1,14 @@
 # ScreenConnect report relay
 
-This directory contains the receive-only relay used by `Submit-ConnectWiseReport.ps1`.
-It is a private holding service, not a ConnectWise submission client.
+This directory contains a receive-only report relay. It is a private holding service, not a
+ConnectWise submission client.
+
+**Not used by the current client.** `Submit-ConnectWiseReport.ps1` no longer posts to this
+relay: its only share path is a plain-text paste of the sanitized report JSON to the MicroBin
+server named in `microbin-url.txt` (see rule 13 in `docs/06-safety-model.md` and section 3 of
+`DEPLOY.md`). No ZIP is uploaded and no bearer token is sent. The code here is kept for
+reference and for its exporters. What follows describes this relay, not the client, and was
+not re-checked against the live server.
 
 - `app.py` accepts authenticated ZIP uploads at `POST /v1/uploads`.
 - `export_reports.py` is a root-only local bulk exporter that bundles every
@@ -25,7 +32,7 @@ route through the reverse proxy. The bearer-token digest and age recipient in
 the live environment file are generated during deployment and are never kept in
 this repository.
 
-The client package is intentionally sanitized. Raw config files, raw evidence,
-parameter blobs, credentials, and private keys are not sent automatically.
+The relay was built for the sanitized ZIP package the client used to send. Raw config
+files, raw evidence, parameter blobs, credentials, and private keys were never part of it.
 ConnectWise submission remains a reviewed action through its official Trust
 Center workflow.

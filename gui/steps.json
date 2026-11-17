@@ -61,7 +61,7 @@
       "Id": "6a", "Title": "Scanner: KVRT", "Group": "Scanners",
       "Phases": ["ALL", "ONLINE"],
       "Calls": [
-        { "Script": "Invoke-GUIScanner.ps1", "Args": ["-Scanner", "KVRT"],
+        { "Script": "Invoke-GUIScanner.ps1", "Args": ["-Scanner", "KVRT", "-ResultPath", "{RunRoot}\\logs\\scanner-KVRT-result.json"], "Before": "EnsureLogsDir",
           "Ask": "Scanners", "When": ["Answer:ScanKvrt"], "SkipText": "Skipped by the technician.",
           "Needs": ["Exists:{ToolRoot}tools\\AV\\KVRT.exe"], "NeedsText": "tools\\AV\\KVRT.exe not staged - run step 1 first.",
           "OnNonZero": "Warn", "Retry": true }
@@ -71,7 +71,7 @@
       "Id": "6b", "Title": "Scanner: ESET Online Scanner", "Group": "Scanners",
       "Phases": ["ALL", "ONLINE"],
       "Calls": [
-        { "Script": "Invoke-GUIScanner.ps1", "Args": ["-Scanner", "ESET"],
+        { "Script": "Invoke-GUIScanner.ps1", "Args": ["-Scanner", "ESET", "-ResultPath", "{RunRoot}\\logs\\scanner-ESET-result.json"], "Before": "EnsureLogsDir",
           "Ask": "Scanners", "When": ["Answer:ScanEset"], "SkipText": "Skipped by the technician.",
           "Needs": ["Exists:{ToolRoot}tools\\AV\\esetonlinescanner.exe"], "NeedsText": "tools\\AV\\esetonlinescanner.exe not staged - run step 1 first.",
           "OnNonZero": "Warn", "Retry": true }
@@ -118,7 +118,7 @@
       "Phases": ["ALL", "OFFLINE"],
       "Calls": [
         { "Script": "Repair-PowerOptions.ps1",
-          "Args": ["-Apply", "-Confirm:$false", "-WorkDir", "{RunRoot}", "-ResultPath", "{RunRoot}\\power-options-repair.json", "{@GpoArgs}"],
+          "Args": ["-Apply", "-WorkDir", "{RunRoot}", "-ResultPath", "{RunRoot}\\power-options-repair.json", "{@GpoArgs}"],
           "Ask": "PowerRepair", "When": ["Answer:PowerRepair"], "SkipText": "Not requested.",
           "After": "MarkPowerRepair", "OnNonZero": "WarnPipe", "NonZeroText": "Power-options repair failed - review power-options-repair.json." }
       ]
@@ -136,7 +136,7 @@
       "Phases": ["ALL", "OFFLINE"],
       "Calls": [
         { "Script": "diff-snapshots.ps1",
-          "Args": ["-BeforeFile", "{RunRoot}\\snapshot_before.json", "-AfterFile", "{RunRoot}\\snapshot_after.json", "-OutFile", "{RunRoot}\\snapshot_diff.json"],
+          "Args": ["-BeforeFile", "{RunRoot}\\snapshot_before.json", "-AfterFile", "{RunRoot}\\snapshot_after.json", "-OutFile", "{RunRoot}\\snapshot_diff.json", "{@ManifestArgs}"],
           "When": ["Exists:{RunRoot}\\snapshot_before.json", "Exists:{RunRoot}\\snapshot_after.json"],
           "SkipText": "The before or after snapshot is missing, so there is nothing to diff.",
           "OnNonZero": "Diff" }
@@ -146,19 +146,20 @@
       "Id": "9a", "Title": "Investigation report", "Group": "Report",
       "Phases": ["ALL", "OFFLINE", "DETECT"],
       "Calls": [
+        { "Script": "Write-ScannerSummary.ps1", "Args": ["-WorkDir", "{RunRoot}", "{@ScannerStateArgs}"], "When": ["Has:FindingsJson", "Exists:{FindingsJson}"], "OnNonZero": "Warn" },
         { "Script": "New-InvestigationReport.ps1",
           "Args": ["-FindingsJson", "{FindingsJson}", "{@KeptArg}", "{@ManifestArgs}",
                    "-PersistenceInventory", "{RunRoot}\\persistence\\inventory.json",
                    "-PersistenceRemoval", "{RunRoot}\\persistence\\removal.json",
                    "-PersistenceResult", "{RunRoot}\\persistence\\result.json",
-                   "-PowerOptionsRepair", "{RunRoot}/power-options-repair.json",
+                   "{@PowerArg}", "{@ScannerArgs}",
                    "-OutputPath", "{RunRoot}/report.html"],
           "When": ["Has:FindingsJson", "Exists:{FindingsJson}"], "SkipText": "No current-run findings.json available - the report is skipped.",
           "After": "MarkReport", "OnNonZero": "WarnPipe", "NonZeroText": "Report generation failed." }
       ]
     },
     {
-      "Id": "9b", "Title": "Package and share the report", "Group": "Report",
+      "Id": "9b", "Title": "Package and share the report", "TitleNoShare": "Build the report package (keep on this PC)", "Group": "Report",
       "Phases": ["ALL", "OFFLINE"],
       "Calls": [
         { "Script": "Submit-ConnectWiseReport.ps1",
@@ -183,12 +184,13 @@
       "Id": "9r", "Title": "Rebuild the report with the after-scans persistence check", "Group": "Report",
       "Phases": ["ONLINE"],
       "Calls": [
+        { "Script": "Write-ScannerSummary.ps1", "Args": ["-WorkDir", "{RunRoot}", "{@ScannerStateArgs}"], "When": ["Not:ScannerOnly", "Has:FindingsJson"], "OnNonZero": "Warn" },
         { "Script": "New-InvestigationReport.ps1",
           "Args": ["-FindingsJson", "{FindingsJson}", "{@AfterScansReportArgs}",
                    "-PersistenceInventory", "{RunRoot}\\after-scans\\persistence\\inventory.json",
                    "-PersistenceRemoval", "{RunRoot}\\after-scans\\persistence\\removal.json",
                    "-PersistenceResult", "{RunRoot}\\after-scans\\persistence\\result.json",
-                   "-PowerOptionsRepair", "{RunRoot}\\power-options-repair.json",
+                   "{@PowerArgBs}", "{@ScannerArgs}",
                    "-OutputPath", "{RunRoot}\\report-after-scans.html"],
           "When": ["Not:ScannerOnly", "Has:FindingsJson", "Exists:{RunRoot}\\after-scans\\persistence\\result.json"],
           "SkipText": "No after-scans persistence result: the offline report is shared as it is.",
@@ -196,14 +198,14 @@
       ]
     },
     {
-      "Id": "9o", "Title": "Share the report", "Group": "Report",
+      "Id": "9o", "Title": "Share the report", "TitleNoShare": "Build the report package (sharing unticked)", "Group": "Report",
       "Phases": ["ONLINE"],
       "Calls": [
         { "Script": "Submit-ConnectWiseReport.ps1",
           "Args": ["-FindingsJson", "{FindingsJson}", "-WorkDir", "{RunRoot}", "{@ReportArg}",
                    "-PersistenceInventory", "{SharePDir}\\inventory.json",
                    "-PersistenceRemoval", "{SharePDir}\\removal.json",
-                   "-PersistenceResult", "{SharePDir}\\result.json"],
+                   "-PersistenceResult", "{SharePDir}\\result.json", "{@ShareArgs}"],
           "When": ["Not:ScannerOnly", "Has:FindingsJson"],
           "SkipText": "Nothing to share: scanner-only run, or the offline-half run has no findings.json.",
           "OnMissing": "WarnPipeSkip", "MissingMessage": "Submit-ConnectWiseReport.ps1 missing - the report was not shared.",
@@ -215,7 +217,7 @@
       "Id": "9q", "Title": "Refresh the Desktop copy of the report", "Group": "Report",
       "Phases": ["ONLINE"],
       "Calls": [
-        { "Builtin": "DesktopCopyRefresh", "When": ["Flag:Shared", "Exists:{ShareReport}"], "SkipText": "The report was not shared, so the Desktop copy is unchanged.",
+        { "Builtin": "DesktopCopyRefresh", "When": ["Flag:ShareBuilt", "Exists:{ShareReport}"], "SkipText": "The share step did not finish cleanly, so the Desktop copy is unchanged.",
           "OnNonZero": "Warn", "NonZeroText": "Could not refresh the Desktop copy of report.html - the run folder has the updated one." }
       ]
     },

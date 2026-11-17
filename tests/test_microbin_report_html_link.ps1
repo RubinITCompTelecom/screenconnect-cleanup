@@ -213,8 +213,8 @@ port_path.write_text(str(server.server_port), encoding='ascii')
 server.serve_forever()
 '@ | Set-Content -LiteralPath $receiverScript -Encoding ASCII
 
-$pythonCommand = Get-Command python3 -ErrorAction SilentlyContinue
-if (-not $pythonCommand) { $pythonCommand = Get-Command python -ErrorAction SilentlyContinue }
+$pythonCommand = Get-Command python3, python -CommandType Application -All -ErrorAction SilentlyContinue |
+    Where-Object { $_.Source -notmatch '\\Microsoft\\WindowsApps\\' } | Select-Object -First 1
 if (-not $pythonCommand) { throw 'python is required for the disposable MicroBin receiver test' }
 $pythonPath = if ($pythonCommand.Source) { $pythonCommand.Source } else { $pythonCommand.Path }
 

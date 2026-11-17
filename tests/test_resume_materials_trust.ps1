@@ -69,6 +69,17 @@ if ($env:OS -ne 'Windows_NT') {
     } finally { Remove-Item -LiteralPath $mixed -Force -ErrorAction SilentlyContinue }
 }
 
+# Order contract (all platforms): the resume task must be registered before the
+# delayed MoveFileEx is queued, and there must be no fake "cancel" call. Source
+# inspection only - MoveFileEx and task registration are never invoked here.
+$src = [IO.File]::ReadAllText($scriptPath)
+$iReg  = $src.IndexOf('if (-not (Set-RunOnceResume -InstanceId $InstanceId -WorkDir $WorkDir)) {')
+$iMove = $src.IndexOf('$kernelType::MoveFileEx($SourcePath, $destPath')
+Assert-True (($iReg -ge 0) -and ($iMove -gt $iReg)) 'resume task is registered before MoveFileEx is queued'
+Assert-True ($src.IndexOf('$kernelType::MoveFileEx($SourcePath, $null') -lt 0) 'no fake MoveFileEx cancel remains'
+$regBlock = $src.Substring($iReg, [Math]::Min(600, $src.Length - $iReg))
+Assert-True ($regBlock -match 'throw ') 'registration failure aborts before queuing the move'
+
 if ($failures.Count -gt 0) { Write-Host ("`n" + $failures.Count + ' failure(s)') -ForegroundColor Red; exit 1 }
 Write-Host "`nPASS: resume-materials trust check fails closed"
 exit 0

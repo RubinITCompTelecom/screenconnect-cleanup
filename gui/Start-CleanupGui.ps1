@@ -95,10 +95,11 @@ $xamlText = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'MainWindow.xaml'))
 $win = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader ([xml]$xamlText)))
 $ui = @{}
 $controlNames = 'TitleText', 'InfoText', 'RunText', 'BtnOpenRitRoot','StepperHost', 'StartPanel',
-'RbOffline', 'RbOnline', 'RbDetect', 'RbStage', 'BtnStart', 'PriorRunsText',
+'RbOffline', 'RbOnline', 'RbDetect', 'RbStage', 'SharePanel', 'CbShare', 'BtnStart', 'PriorRunsText',
 'RunPanel', 'StatusTitle', 'StatusDetail', 'Busy', 'Banner', 'BannerText', 'ReviewBar', 'ReviewSummary', 'BtnReviewContinue',
 'CardsHost', 'BtnOpenReport', 'BtnOpenRun', 'BtnRestart', 'BtnNewRun', 'BtnCopy', 'BtnOpenLog', 'ConsoleBox',
-'RowConsole', 'ColStepper', 'LinkRubinIt', 'LinkPupontech', 'RootGrid', 'HeaderCard', 'StatusCard'
+'RowConsole', 'ColStepper', 'LinkRubinIt', 'LinkPupontech', 'RootGrid', 'HeaderCard', 'StatusCard',
+'ScanControls', 'BtnPauseScan', 'BtnStopScan', 'ScanControlHint'
 $missing = @()
 foreach ($n in $controlNames) {
     $c = $win.FindName($n)
@@ -120,17 +121,26 @@ $script:StepRows = @{}
 $script:LogPath = ''
 $script:KeepRows = @()
 $script:CloseLock = $false
+$script:ScanPauseRequested = $false
+$script:ScanWaiting = $false
 $script:DlgValue = $null
 $script:DlgChecks = @{}
 $script:DlgText = $null
 $script:ConsoleSaved = Set-GuiConsoleEncoding
 $script:ShareUrl = ''
+# The share step printed "MICROBIN UPLOAD: skipped; ..." (ticked, but no server configured): its reason.
+$script:ShareSkipped = ''
+# Characters in the console pane, counted as they are appended (reading .Text copies the whole pane).
+$script:ConsoleChars = 0
 $script:SessionWriteWarned = $false
 # The modes the window offers and their labels come from gui\steps.json ("Window": true), the one list.
 # The core also knows 'Full' (START-HERE.bat with no flag), but in the window it would only repeat
 # Offline followed by Online, so it is not offered (owner, 2026-11-10).
 $script:ModeLabels = @{}
 foreach ($m in (Get-GuiWindowModes)) { $script:ModeLabels[$m.Name] = $m.Label }
+# The one-go run is never a start-panel choice: the Online half switches to it only when this PC has
+# no finished offline-half run and the technician chooses "Clean up first, then scan" (Start-Run).
+$script:OneGoLabel = 'Online: cleanup first, then scanners (no offline run to continue)'
 
 # Test hooks: canned dialog answers stand in for the technician's clicks (tests\gui only).
 # They are honoured ONLY in a window that is NOT elevated. Nothing the engine does to the PC can
@@ -205,7 +215,13 @@ function Add-ConsoleLines {
     if (@($Lines).Count -eq 0) { return }
     $text = (@($Lines) -join "`r`n") + "`r`n"
     $ui.ConsoleBox.AppendText($text)
-    if ($ui.ConsoleBox.Text.Length -gt 400000) { $ui.ConsoleBox.Text = $ui.ConsoleBox.Text.Substring(200000) }
+    # The length is counted here, not read from .Text: .Text builds a copy of the whole pane on every read.
+    $script:ConsoleChars += $text.Length
+    if ($script:ConsoleChars -gt 400000) {
+        # Cap the pane: keep the newest half. The full output is in gui-console.log.
+        $ui.ConsoleBox.Text = $ui.ConsoleBox.Text.Substring(200000)
+        $script:ConsoleChars = $ui.ConsoleBox.Text.Length
+    }
     $ui.ConsoleBox.ScrollToEnd()
     Write-GuiLogText ((@($Lines)) -join "`r`n")
 }
@@ -225,6 +241,7 @@ function Get-NotInModeReason {
         'Online' { if ($phases -contains 'OFFLINE') { return 'done by the Offline half' }; return 'not part of the Online half' }
         'Detect' { return 'not in Detect only (it changes nothing)' }
         'Stage' { return 'not in Stage tools (downloads only)' }
+        'Full' { return 'only used when continuing an offline run' }
         default { return 'not in this mode' }
     }
 }
@@ -242,7 +259,8 @@ function Initialize-Stepper {
         $id = [string]$step.Id
         if ($seen.ContainsKey($id)) { continue }
         $seen[$id] = $true
-        $e = [pscustomobject]@{ StepId = $id; StepTitle = [string]$step.Title }
+        # A step the mode runs shows its plan title (the share step reads differently when sharing is unticked).
+        $e = $(if ($inMode.ContainsKey($id)) { $inMode[$id] } else { [pscustomobject]@{ StepId = $id; StepTitle = [string]$step.Title } })
         $outside = -not $inMode.ContainsKey($id)
         # A row: a status dot, the step number and title, and the state underneath. Rounded, borderless
         # until the step is the one running or waiting, which gets an outline in its state colour.
@@ -304,6 +322,7 @@ function Update-Stepper {
                 'Done' { $word = 'done'; $bg = 'SuccessBg'; $fg = 'SuccessFg' }
                 'Warn' { $word = 'done with warning'; $bg = 'WarningBg'; $fg = 'WarningFg'; $note = $res.Message }
                 'Failed' { $word = 'failed'; $bg = 'DangerBg'; $fg = 'DangerFg'; $note = $res.Message }
+                'Cancelled' { $word = 'cancelled'; $bg = 'WarningBg'; $fg = 'WarningFg'; $note = $res.Message }
                 'Skipped' { $word = 'skipped'; $bg = ''; $fg = 'Muted'; $note = $res.Message }
                 'Resurrection' { $word = 'RESURRECTION found'; $bg = 'DangerBg'; $fg = 'DangerFg'; $note = $res.Message }
             }
@@ -780,14 +799,33 @@ function Set-PreviewMode {
 function Start-Run {
     param([string]$ModeName)
     $script:Finished = $false
-    $sess = New-GuiSession -Mode $ModeName -ToolRoot $ToolRoot -RitRoot $RitRoot -Interactive
+    $script:ScanPauseRequested = $false; $script:ScanWaiting = $false
+    # A second run in the same window must never show the previous run's paste link.
+    $script:ShareUrl = ''; $script:ShareSkipped = ''
+    # The share tick box (Online only, ticked by default). Test hook: a canned "ShareReport" answer stands in for it.
+    $share = [bool]$ui.CbShare.IsChecked
+    $ta = Get-TestAnswer 'ShareReport'
+    if ($null -ne $ta) { $share = [bool]$ta }
+    $sess = New-GuiSession -Mode $ModeName -ToolRoot $ToolRoot -RitRoot $RitRoot -Interactive -Answers @{ ShareReport = $share }
     $prior = $null
     if ($ModeName -eq 'Online') {
         $prior = Find-GuiPriorRun -Session $sess
         if ($prior) {
-            $r = Show-Dialog -Id 'ContinuePrior' -Title 'Continue the offline run?' -Message ('A finished offline-half run was found for this PC:' + "`r`n" + $prior.RunRoot + "`r`n`r`nContinue that run? Its report is shared at the end. Otherwise a scanner-only run starts and nothing is shared.") -Buttons @(
+            $r = Show-Dialog -Id 'ContinuePrior' -Title 'Continue the offline run?' -Message ('A finished offline-half run was found for this PC:' + "`r`n" + $prior.RunRoot + "`r`n`r`nContinue that run? " + $(if ($share) { 'Its report is shared at the end.' } else { 'Its report is updated on this PC but not shared (the share box is unticked).' }) + " Otherwise a scanner-only run starts and nothing is shared.") -Buttons @(
                 @{ Text = 'Continue that run'; Value = 'continue' }, @{ Text = 'Start a scanner-only run'; Value = 'new' })
             if ($r -and $r.Value -eq 'new') { $prior = $null }
+        } else {
+            # No finished offline-half run on this PC (staging the tools does not make one). The Online
+            # half has no removal step, so starting it here used to go straight to the scanners and the
+            # cleanup never ran. Ask: clean up first (the one-go sequence START-HERE.bat runs: removal,
+            # then the scanners), or scanners only. Closing the box starts nothing.
+            $r = Show-Dialog -Id 'NoPriorRun' -Title 'The cleanup has not run on this PC' -Message ('No finished cleanup (Offline half) run was found for this PC, so the Online half has nothing to continue. Staging the tools does not count as a cleanup.' + "`r`n`r`nClean up first? Detection and removal run first (you choose what to keep and type REMOVE), then the scanners. " + $(if ($share) { 'The report is shared at the end.' } else { 'The report stays on this PC (sharing is unticked).' })) -Buttons @(
+                @{ Text = 'Clean up first, then scan'; Value = 'full' }, @{ Text = 'Scanners only'; Value = 'scan' })
+            if (-not $r) { Add-ConsoleNote 'No run started: the cleanup-or-scanners question was closed.'; if ($script:AutoStart) { $win.Close() }; return }
+            if ($r.Value -eq 'full') {
+                $ModeName = 'Full'
+                $sess = New-GuiSession -Mode $ModeName -ToolRoot $ToolRoot -RitRoot $RitRoot -Interactive -Answers @{ ShareReport = $share }
+            }
         }
     }
     try {
@@ -809,15 +847,17 @@ function Start-Run {
         $script:LogPath = Join-Path $logs 'gui-console.log'
     }
     $ui.ConsoleBox.Clear()
+    $script:ConsoleChars = 0
     $ui.CardsHost.Children.Clear()
     $ui.Banner.Visibility = 'Collapsed'
     $ui.ReviewBar.Visibility = 'Collapsed'
     $ui.BtnNewRun.Visibility = 'Collapsed'
     $ui.BtnRestart.Visibility = 'Collapsed'
-    $ui.InfoText.Text = 'PC: ' + $env:COMPUTERNAME + '     Mode: ' + $script:ModeLabels[$ModeName]
+    $label = $(if ($ModeName -eq 'Full') { $script:OneGoLabel } else { $script:ModeLabels[$ModeName] })
+    $ui.InfoText.Text = 'PC: ' + $env:COMPUTERNAME + '     Mode: ' + $label
     $ui.RunText.Text = $(if ($run) { 'Run folder: ' + $run } else { 'Run folder: none (this mode creates none)' })
     Show-Panel 'Run'
-    Add-ConsoleNote ($script:ModeLabels[$ModeName] + $(if ($run) { '. Run folder: ' + $run } else { '' }))
+    Add-ConsoleNote ($label + $(if ($run) { '. Run folder: ' + $run } else { '' }))
     if ($sess.ScannerOnly) { Add-ConsoleNote 'No offline-half run is being continued: this is a scanner-only run. There is no report to share from it.' }
     Save-Session
     Update-Stepper
@@ -825,10 +865,71 @@ function Start-Run {
     Move-Next
 }
 
+function Update-ScanControls {
+    $active = ($script:Child -and -not $script:Child.Finished -and (Test-GuiScanAction -Action $script:Action -CloseLock $script:CloseLock))
+    $ui.ScanControls.Visibility = $(if ($active -or $script:ScanWaiting) { 'Visible' } else { 'Collapsed' })
+    $ui.BtnPauseScan.Content = $(if ($script:ScanWaiting) { 'Resume' } elseif ($script:ScanPauseRequested) { 'Continue automatically' } else { 'Pause after scan' })
+    $ui.ScanControlHint.Text = $(if ($script:ScanWaiting) { 'Paused between steps. Resume to continue, or Stop scan to end the run.' } elseif ($script:ScanPauseRequested) { 'Pause requested. The current scan finishes; the next step waits for Resume.' } else { 'Pause waits for this scan to finish. Stop cancels this tool scan and ends the run.' })
+}
+
+function Invoke-ScanPause {
+    if ($script:InDialog -or $script:CloseLock) { return }
+    if ($script:ScanWaiting) {
+        $script:ScanWaiting = $false; $script:ScanPauseRequested = $false
+        Add-ConsoleNote 'Resumed by the technician.'
+        Update-ScanControls
+        Move-Next
+    } elseif ($script:Child -and (Test-GuiScanAction -Action $script:Action)) {
+        $script:ScanPauseRequested = -not $script:ScanPauseRequested
+        Add-ConsoleNote $(if ($script:ScanPauseRequested) { 'Pause requested after the current tool scan finishes.' } else { 'Pause request cleared; the run will continue automatically.' })
+        Update-ScanControls
+    }
+}
+
+function Continue-AfterScan {
+    param($Action)
+    if ($script:ScanPauseRequested -and -not $script:Session.Stopped -and (Test-GuiScanAction -Action $Action)) {
+        $script:ScanWaiting = $true
+        $ui.Busy.IsIndeterminate = $false
+        $ui.StatusDetail.Text = 'Paused between steps. Click Resume to continue.'
+        Add-ConsoleNote 'Paused after the tool scan. No later step will start until Resume.'
+        Update-ScanControls
+        return
+    }
+    Update-ScanControls
+    Move-Next
+}
+
+function Invoke-ScanStop {
+    if ($script:InDialog -or $script:CloseLock) { return }
+    if (-not $script:ScanWaiting -and (-not $script:Child -or -not (Test-GuiScanAction -Action $script:Action))) { return }
+    $wasWaiting = $script:ScanWaiting
+    $message = $(if ($wasWaiting) { 'End this paused run? The completed scan results are kept. Later steps will not start.' } else { 'The current tool scan will be cancelled and the run will stop. Later removal, scanners and sharing will not start. Existing evidence is kept; interrupted output may be incomplete.' })
+    $r = Show-Dialog -Id 'StopToolScan' -Title 'Stop this tool scan?' -Message $message -Buttons @(
+        @{ Text = 'Stop scan and run'; Value = 'stop' }, @{ Text = 'Keep running'; Value = 'continue' })
+    if (-not $r -or $r.Value -ne 'stop') { return }
+    if ($script:Child) {
+        Stop-GuiChild -Child $script:Child
+        if (-not $script:Child.Process.WaitForExit(5000)) { Add-ConsoleNote 'The scan could not be stopped yet. It is still running; try again.'; return }
+        [void](Complete-GuiAction -Session $script:Session -Action $script:Action -ExitCode 130 -Message 'Cancelled by the technician.')
+        $last = $script:Session.Results[$script:Session.Results.Count - 1]
+        $last.Status = 'Cancelled'; $last.Message = 'Cancelled by the technician; output may be incomplete.'
+    }
+    $script:Session.Stopped = $true
+    $script:Session.StopMessage = $(if ($wasWaiting) { 'Stopped by the technician between steps. Completed scan results are kept; later steps did not run.' } else { 'Stopped by the technician. The tool scan was cancelled; later steps did not run.' })
+    if ($script:Session.PipeRc -eq 0) { $script:Session.PipeRc = 130 }
+    $script:Child = $null; $script:Action = $null
+    $script:ScanPauseRequested = $false; $script:ScanWaiting = $false
+    Add-ConsoleNote $script:Session.StopMessage
+    Update-ScanControls
+    Complete-Run
+}
+
 function Move-Next {
     # Starts the next call, or asks the next question, or finishes. Runs only on the UI thread and
     # only when no child is alive.
     while ($true) {
+        Update-ScanControls
         $a = Get-GuiNextAction -Session $script:Session
         if (-not $a) { Complete-Run; return }
         $script:Action = $a
@@ -864,6 +965,7 @@ function Move-Next {
             continue
         }
         Update-Stepper
+        Update-ScanControls
         return
     }
 }
@@ -874,6 +976,8 @@ function Complete-Run {
     $script:CloseLock = $false
     $script:Finished = $true
     $sess = $script:Session
+    $script:ScanPauseRequested = $false; $script:ScanWaiting = $false
+    Update-ScanControls
     $ui.Busy.IsIndeterminate = $false
     $ui.Busy.Value = 1
     $ui.StatusTitle.Text = $(if ($sess.Stopped) { 'Stopped' } else { 'Finished' })
@@ -998,7 +1102,9 @@ function Show-RunSummary {
         $s = $res[$sid]
         if (-not $s) { Add-SummaryLine 'Report share' 'not reached' 'WarningFg'; continue }
         if ($s.Status -eq 'Skipped') { Add-SummaryLine 'Report share' ('not shared - ' + $s.Message) 'Muted' }
+        elseif ($s.Status -eq 'Done' -and -not [bool]$Sess.Answers['ShareReport']) { Add-SummaryLine 'Report share' 'not shared - you unticked sharing. The report and connectwise-report.zip are on this PC only.' 'Muted' }
         elseif ($s.Status -ne 'Done') { Add-SummaryLine 'Report share' ('failed - ' + $s.Message + ' The local report is kept.') 'DangerFg' }
+        elseif ($sid -eq '9o' -and $script:ShareSkipped) { Add-SummaryLine 'Report share' ('NOT shared - ' + $script:ShareSkipped + ' (microbin-url.txt beside the tool is empty). The report and connectwise-report.zip are on this PC only.') 'WarningFg' }
         elseif ($script:ShareUrl) { Add-SummaryLine 'Report shared - paste link' $script:ShareUrl -Selectable }
         elseif ($Sess.Phase -eq 'OFFLINE') { Add-SummaryLine 'Report' 'package built on this PC, not uploaded (the Online half shares it)' 'Muted' }
         else { Add-SummaryLine 'Report share' 'done (no paste link was printed)' 'Muted' }
@@ -1025,6 +1131,8 @@ function Write-ResultFile {
             StartPanelVisible = ($ui.StartPanel.Visibility -eq 'Visible'); RunPanelVisible = ($ui.RunPanel.Visibility -eq 'Visible')
             KeepIdentifiers = @($script:Session.Answers['KeepIdentifiers'])
             ShareUrl = $script:ShareUrl
+            ShareSkipped = $script:ShareSkipped
+            ShareReport = [bool]$script:Session.Answers['ShareReport']
             # A TextBlock built from Runs (bold label + value) reports no .Text, so read its Runs.
             CardTexts = @($ui.CardsHost.Children | ForEach-Object {
                     if ($_ -is [System.Windows.Controls.TextBlock]) { $(if ($_.Inlines.Count -gt 0) { (@($_.Inlines | ForEach-Object { if ($_ -is [System.Windows.Documents.Run]) { $_.Text } }) -join '') } else { $_.Text }) }
@@ -1057,6 +1165,8 @@ function Invoke-Tick {
         if ($script:Action -and ($script:Action.StepId -eq '9b' -or $script:Action.StepId -eq '9o')) {
             $url = Get-GuiShareUrl $u.Lines
             if ($url) { $script:ShareUrl = $url }
+            $skip = Get-GuiShareSkipped $u.Lines
+            if ($skip) { $script:ShareSkipped = $skip }
         }
     }
     if ($u.Exited) {
@@ -1076,6 +1186,8 @@ function Invoke-Tick {
             }
         }
         $o = Complete-GuiAction -Session $script:Session -Action $a -ExitCode ([int]$u.ExitCode)
+        # Ticked, but the uploader had no server to send to: the run is not "shared".
+        if ($a.StepId -eq '9o' -and $script:ShareSkipped) { $script:Session.Shared = $false }
         $script:Child = $null
         $script:Action = $null
         Add-ConsoleNote ('Step ' + $o.StepId + ' ended with exit code ' + $o.ExitCode + ' (' + $o.Status + ')' + $(if ($o.Message) { ': ' + $o.Message } else { '' }))
@@ -1083,7 +1195,7 @@ function Invoke-Tick {
         if ($a.StepId -eq '4' -and $script:Session.FindingsJson) { [void](Show-Findings) }
         Update-Stepper
         Update-HeaderButtons
-        Move-Next
+        Continue-AfterScan -Action $a
         return
     }
     $elapsed = (Get-Date).ToUniversalTime() - $script:Child.StartedUtc
@@ -1093,6 +1205,7 @@ function Invoke-Tick {
     $ui.StatusDetail.Text = $text
     $pp = Get-GuiPendingPrompt -Child $script:Child
     if ($pp) { Resolve-Prompt $pp }
+    Update-ScanControls
 }
 
 # ---- self-test (no window is shown, nothing runs) -------------------------------------------------
@@ -1147,10 +1260,19 @@ if ($SelfTest) {
 }
 
 # ---- wiring --------------------------------------------------------------------------------------
-$ui.TitleText.Text = 'ScreenConnect Cleanup  v' + $script:Version
+$ui.BtnPauseScan.add_Click({ Invoke-ScanPause })
+$ui.BtnStopScan.add_Click({ Invoke-ScanStop })
+$channelLabel = $(if ($script:Version -match '(?i)(?:^|[.-])alpha(?:[.-]|$)') { 'ALPHA  ' } else { '' })
+$ui.TitleText.Text = 'ScreenConnect Cleanup  ' + $channelLabel + 'v' + $script:Version
+$win.Title = $ui.TitleText.Text
 $ui.RbOffline.Tag = 'Offline'; $ui.RbOnline.Tag = 'Online'; $ui.RbDetect.Tag = 'Detect'; $ui.RbStage.Tag = 'Stage'
 foreach ($rb in $ui.RbOffline, $ui.RbOnline, $ui.RbDetect, $ui.RbStage) {
-    $rb.add_Checked({ param($s, $e) if (-not $script:Session -or $script:Finished) { Set-PreviewMode ([string]$s.Tag) } })
+    $rb.add_Checked({
+            param($s, $e)
+            if (-not $script:Session -or $script:Finished) { Set-PreviewMode ([string]$s.Tag) }
+            # The share tick box belongs to the Online half only.
+            $ui.SharePanel.Visibility = $(if ([string]$s.Tag -eq 'Online') { 'Visible' } else { 'Collapsed' })
+        })
 }
 Set-PreviewMode 'Offline'
 Update-HeaderButtons
@@ -1166,6 +1288,7 @@ $ui.BtnStart.add_Click({ Start-Run (Get-SelectedMode) })
 $ui.BtnReviewContinue.add_Click({ Complete-Review })
 $ui.BtnNewRun.add_Click({
         $script:Session = $null; $script:Action = $null; $script:Child = $null; $script:LogPath = ''; $script:Finished = $false
+        $script:ShareUrl = ''; $script:ShareSkipped = ''
         $ui.RunText.Text = 'Run folder: none yet'
         Set-PreviewMode (Get-SelectedMode); Update-HeaderButtons; Show-Panel 'Start'
     })
@@ -1193,24 +1316,33 @@ $timer.add_Tick({
 
 $win.add_Closing({
         param($s, $e)
-        if ($script:Child -and -not $script:Child.Finished) {
-            if ($script:CloseLock) {
-                [void][System.Windows.MessageBox]::Show('Removal or an uninstall is in progress. Closing now can leave the PC half cleaned. Wait for this step to finish.', 'ScreenConnect Cleanup', 'OK', 'Warning')
-                $e.Cancel = $true
-                return
+        # A message box pumps messages, so the 250 ms timer would keep ticking under it: a step could end,
+        # the next one start and its prompt dialogs open behind this box. Pause the timer while the box is
+        # up and start it again only when the close is cancelled.
+        $timerWasOn = $timer.IsEnabled
+        $timer.Stop()
+        try {
+            if ($script:Child -and -not $script:Child.Finished) {
+                if ($script:CloseLock) {
+                    [void][System.Windows.MessageBox]::Show('Removal or an uninstall is in progress. Closing now can leave the PC half cleaned. Wait for this step to finish.', 'ScreenConnect Cleanup', 'OK', 'Warning')
+                    $e.Cancel = $true
+                    return
+                }
+                # A scanner the technician is driving is left open when the window closes (design 7):
+                # only the step's own powershell.exe is ended, never the scanner it started.
+                $isScanner = ($script:Action -and @('6a', '6b', '6c') -contains $script:Action.StepId)
+                if (-not $script:AutoStart) {
+                    $q = $(if ($isScanner) { 'A scanner is still open. Close this window? The scanner window stays open; finish or close it yourself.' } else { 'A step is still running. Stop it and close? (Nothing has been approved for removal in this step yet.)' })
+                    $ans = [System.Windows.MessageBox]::Show($q, 'ScreenConnect Cleanup', 'YesNo', 'Question')
+                    if ($ans -ne 'Yes') { $e.Cancel = $true; return }
+                }
+                if ($isScanner) { Stop-GuiChild $script:Child -KeepDescendants } else { Stop-GuiChild $script:Child }
+            } elseif ($script:Action -and $script:Action.Kind -eq 'Ask' -and -not $script:AutoStart) {
+                $ans = [System.Windows.MessageBox]::Show('The run is waiting for your choice. Close the window? Nothing has been changed by this step yet.', 'ScreenConnect Cleanup', 'YesNo', 'Question')
+                if ($ans -ne 'Yes') { $e.Cancel = $true }
             }
-            # A scanner the technician is driving is left open when the window closes (design 7):
-            # only the step's own powershell.exe is ended, never the scanner it started.
-            $isScanner = ($script:Action -and @('6a', '6b', '6c') -contains $script:Action.StepId)
-            if (-not $script:AutoStart) {
-                $q = $(if ($isScanner) { 'A scanner is still open. Close this window? The scanner window stays open; finish or close it yourself.' } else { 'A step is still running. Stop it and close? (Nothing has been approved for removal in this step yet.)' })
-                $ans = [System.Windows.MessageBox]::Show($q, 'ScreenConnect Cleanup', 'YesNo', 'Question')
-                if ($ans -ne 'Yes') { $e.Cancel = $true; return }
-            }
-            if ($isScanner) { Stop-GuiChild $script:Child -KeepDescendants } else { Stop-GuiChild $script:Child }
-        } elseif ($script:Action -and $script:Action.Kind -eq 'Ask' -and -not $script:AutoStart) {
-            $ans = [System.Windows.MessageBox]::Show('The run is waiting for your choice. Close the window? Nothing has been changed by this step yet.', 'ScreenConnect Cleanup', 'YesNo', 'Question')
-            if ($ans -ne 'Yes') { $e.Cancel = $true }
+        } finally {
+            if ($timerWasOn -and $e.Cancel) { $timer.Start() }
         }
     })
 

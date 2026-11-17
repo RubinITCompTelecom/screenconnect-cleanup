@@ -5,6 +5,14 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+if ($env:OS -eq 'Windows_NT') {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        Write-Host 'SKIP: real preflight success-path probes require an elevated Windows test host.'
+        exit 0
+    }
+}
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $preflightPath = Join-Path $repoRoot 'preflight.ps1'
 $psHost = $null

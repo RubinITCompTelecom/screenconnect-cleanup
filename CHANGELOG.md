@@ -3,7 +3,92 @@
 Semantic versions. The deploy zip is named `screenconnect-cleanup-v<VER>.zip`
 and carries a `VERSION` file so each build is self-identifying.
 
-## [Unreleased] - README rewrite, one-liner installer fix
+## [1.8.12-gui-alpha.6] - 2026-11-16 - Reviewed cleanup and GUI integration (ALPHA)
+**ALPHA prerelease.** Combines the reviewed cleanup repairs with the GUI Online cleanup-first fix.
+Existing releases, their assets/tags and the Latest selection are preserved. Live elevated VM acceptance
+remains outstanding. The window title and header identify this build as ALPHA.
+- Online cleanup-first preserves the share checkbox when creating its full-run session; unticked sharing
+  stays local. Covered alongside Stage then Online, no-prior cancellation, and scanner-only selection.
+- Tool scans now offer Stop scan and Pause after scan / Resume. Stop cancels only the owned tool-scan
+  process tree and prevents later steps; pause waits at the scan boundary without disturbing watchdogs.
+  Approved cleanup and external antivirus processes are excluded. Cancelled output is never a successful scan.
+- The preceding repaired build passed 164 automated matrix commands with two elevation-only skips;
+  see `docs/regression-repairs-2026-11-16.md`. Integration-specific results are recorded separately.
+
+### Included code-review fixes (2026-11-12)
+Fixes for the findings in the 2026-11-12 code review. Not yet run end to end on a VM.
+- **Follow-up regression repairs (2026-11-16):** removal manifests retain the actual user's SID for
+  Run values, and the diff preserves registry hive/user identity. A legacy HKCU target without a SID
+  yields INCOMPLETE rather than an unverifiable CLEAN. Loaded-user uninstall keys emitted by the
+  detector now pass the remover's constrained uninstall-root validation and fallback search.
+  Profile collection honors redirected AppData in loaded users' raw User Shell Folders values and
+  the current account's environment. Integer/decimal comparisons preserve exact numeric precision.
+- **Guided scanner reports:** both batch and GUI pass all three scanner outcomes through
+  `Write-ScannerSummary.ps1`; skipped, unstaged and failed launches remain distinct. Reports retain
+  raw scanner identity and process exit-code fields. An unfamiliar quiet prompt again offers the
+  generic answer dialog, while recognized snapshot progress does not.
+- **Regression coverage:** the twelve previously omitted review tests and the new repair tests run
+  in both CI PowerShell editions. Protected directory creation uses the corresponding atomic ACL
+  API on each edition. Console-visibility fixtures establish a visible starting window, and the
+  watchdog's successful-worker fixture allows startup time without extending stall/failure budgets.
+- **Power-options repair can start again (#1).** START-HERE.bat, sc-cleanup.ps1 and steps.json passed
+  `-Confirm:$false` through `powershell -File`, which arrives as a string and failed binding (exit 1). Removed;
+  a test now launches the repair with the exact argument lists from the bat and steps.json.
+- **Removal (remove-screenconnect.ps1):** `MsiExec /X{GUID}` is recognised and the GUID keeps its braces; an
+  uninstall string that is refused is Skipped, not Failed (#2). A product-verification failure now fails the run
+  and the wrapper says NOT REMOVED instead of "Removal completed" (#3). Scheduled tasks pointing at the removed exe
+  are found by path text, so they are removed after the install folder is gone (#7). Run values are deleted
+  literally, so a value named `*` cannot empty the Run key (#13). Reboot-resume: the resume task is registered
+  before the delayed move is queued, a failed registration queues nothing, and the fake "cancel" (which actually
+  scheduled a delete) is gone (#10). `C:\RIT-SCC` itself is now locked to Administrators/SYSTEM (Users read), so
+  the resume materials pass the trust check.
+  Quarantine source identity and hash CSV now share one tree walk and one read per file; the independent
+  destination identity check still detects changes after the move.
+- **Report:** sections with exactly one item (one process, connection, event, property) are no longer dropped (#4).
+  The guided-run report passes scanner status and leaves the power-repair section out when the repair was declined (#24).
+- **AV uninstall:** works with 0 or 1 installed products under strict mode (#5); ignores HKCU uninstall entries,
+  accepts ProgramData uninstallers only under `Package Cache`, and sweeps leftovers only when the uninstall key is
+  really gone, by exact folder name (#12).
+- **Scanners (#11):** KVRT/ESET/Malwarebytes must carry a valid vendor Authenticode signature before launch; no more
+  fallbacks to Downloads or %TEMP%; the Malwarebytes installer is downloaded fresh into a locked run-root folder.
+  A BITS download with no progress for 60 s is removed and the web fallback runs.
+- **Detection:** hosts-file lines no longer blow up the persistence inventory JSON (#6). Standalone detect shares the
+  report only with `-ShareReport` (#8). Per-user Run keys, Startup, AppData installs, programs and UserAssist are read
+  for every user profile, not only the elevating admin (#19); rows gain `UserSid`/`UserName` and their keys carry the
+  SID. Only `UserInitMprLogonScript` counts as an Environment autorun (#20). Logon types are filtered in the event
+  query before the 500-event cap (#21). WMI consumers keep their class and command/script (#22). The Administrators
+  group is found by SID (#23). One PID map replaces per-connection/per-process lookups; the script sweep reads
+  C:\Users before Program Files.
+- **Diff verdict (#9):** with the removal manifest (`-ManifestPath`, now passed by all three front ends), RESURRECTION
+  means a removal target is still present; unrelated new items go to `NewSinceBefore`; only stable-section errors make
+  the verdict INCOMPLETE. Precedence RESURRECTION > INCOMPLETE > CLEAN. Faster property comparison.
+- **Window:** unticked share still refreshes the Desktop report (#16); the paste link is cleared on each run (#17);
+  a ticked share with no MicroBin URL says NOT shared (#18); a progress line without a newline no longer raises the
+  answer box; the step timer pauses while the close box is open; the console pane appends instead of rebuilding.
+- **Sanitizer (#14):** user names are hidden in any `\Users\`, `\Documents and Settings\` or `/Users/` path
+  (Windows.old, UNC, forward slashes); `LocalAddress` is never uploaded.
+- **Docs (#15):** safety-model rule 13 describes the MicroBin paste as it is (HTTPS, plain text, read-only, 1-week
+  expiry, readable by anyone with the link); the relay docs are marked unused.
+
+### Included README, installer and share-checkbox changes
+- **Window: "Share the sanitized report" tick box** on the Online choice, ticked by default. Unticked, the
+  share step runs with `-NoUpload`: the package is built locally, nothing is uploaded, the run is not marked
+  shared and the summary says so. The Offline half still never uploads. Console launchers are unchanged.
+- **The MicroBin copy is anonymous**: `ComputerName` and `RunId` (which starts with the computer name) become a
+  short hash `PC-xxxxxxxxxx`, and the PC's own `LocalAddress`/`LocalPort` are left out of the connection records.
+  The remote (scammer-side) address stays. `connectwise-report.zip` and `report.html` on the PC keep the full details.
+- Tests: `Test-GuiAsk.ps1` (default, ticked, unticked, Offline), `test_microbin_report_upload.ps1` (anonymous id,
+  no local address, remote address kept).
+
+## [1.8.12-gui-beta.2] - 2026-11-15 - Online half runs the cleanup; README rewrite, one-liner installer fix
+**Testing zip** (branch fix/gui-skips-removal). Same as gui-beta.1 plus the changes below.
+- **Fix: the window's Online half skipped the cleanup and went straight to the scanners** on a PC
+  with no finished Offline run (including right after Stage tools, which makes no run). The Online
+  half has no removal step and silently became a scanner-only run. It now asks: **Clean up first,
+  then scan** (the full START-HERE.bat sequence: detection, removal with the typed REMOVE, then the
+  scanners, then the report is shared) or **Scanners only**; closing the question starts nothing.
+  Continuing a finished offline run is unchanged. Tests: three new Online scenarios in
+  `tests/gui/Test-GuiWindow.ps1`.
 - **Fix: the `irm ... | iex` one-liner failed on the GUI releases** ("Bundle missing VERSION"):
   `install-latest.ps1` expected VERSION and START-HERE.bat at the top of the zip, which since
   1.8.12-gui-alpha.3 holds only START-HERE-GUI.bat plus `files\`. It now recognises both layouts and

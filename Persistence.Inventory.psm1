@@ -120,6 +120,14 @@ function Get-SccProfileRoots {
     } catch {[void]$gaps.Add('ProfileList enumeration: '+$_.Exception.Message)}
     [pscustomobject]@{Profiles=@($roots.ToArray());Errors=@($gaps.ToArray())}
 }
+function Test-SccAutorunValue {
+    # Only UserInitMprLogonScript in a user's Environment key is an autorun;
+    # TEMP, TMP and Path always contain \AppData\ or \Temp\ and would turn
+    # into a false RunKey finding on every PC (review #20).
+    param([string]$KeyPath,[string]$ValueName)
+    if($KeyPath -match '(?i)\\Environment$'){return ($ValueName -ieq 'UserInitMprLogonScript')}
+    return $true
+}
 function Get-SccRegistryEvidence {
     param([scriptblock]$ValueReader=$null)
     $rows=New-Object System.Collections.ArrayList; $findings=New-Object System.Collections.ArrayList; $errors=New-Object System.Collections.ArrayList
@@ -149,6 +157,7 @@ function Get-SccRegistryEvidence {
                 foreach($valueRow in $values) {
                     $name=[string]$valueRow.Name; $kind=[string]$valueRow.Kind; $value=[string]$valueRow.Value
                     if($name -match '^PS'){continue}
+                    if(-not (Test-SccAutorunValue $keyPath $name)){continue}
                     $removalPath=$keyPath
                     $identity=$removalPath+'|'+$name
                     $row=[pscustomobject]@{RegistryPath=$removalPath;ValueName=$name;OriginalValue=$value;ValueKind=$kind;UserName=$(if($entry.Profile){$entry.Profile.Name}else{$null});SID=$(if($entry.Profile){$entry.Profile.Sid}else{$null});HivePath=$keyPath}
@@ -163,6 +172,7 @@ function Get-SccRegistryEvidence {
                     $kind=[string]$key.GetValueKind($name)
                     $value=[string]$key.GetValue($name,$null,[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
                     if($name -match '^PS'){continue}
+                    if(-not (Test-SccAutorunValue $keyPath $name)){continue}
                     $removalPath=$keyPath
                     $identity=$removalPath+'|'+$name
                     $row=[pscustomobject]@{RegistryPath=$removalPath;ValueName=[string]$name;OriginalValue=$value;ValueKind=$kind;UserName=$(if($entry.Profile){$entry.Profile.Name}else{$null});SID=$(if($entry.Profile){$entry.Profile.Sid}else{$null});HivePath=$keyPath}
@@ -288,7 +298,10 @@ function Get-SccGenericEvidence {
     param([string]$Name,[scriptblock]$Collector)
     try {
         $rows=foreach($item in @(& $Collector)) {
-            if($item -is [string]){$item;continue}
+            # Strings from Get-Content carry PSPath/PSProvider note properties;
+            # ConvertTo-Json -Depth 12 walks the provider graph for every line
+            # and can hang the worker. Emit a plain .NET string instead.
+            if($item -is [string]){$item.ToString();continue}
             $record=[ordered]@{}
             foreach($property in $item.PSObject.Properties){$record[$property.Name]=ConvertTo-SccEvidenceScalar $property.Value}
             [pscustomobject]$record
@@ -298,10 +311,53 @@ function Get-SccGenericEvidence {
         [pscustomobject]@{Items=@();Errors=@($Name+': '+$_.Exception.Message)}
     }
 }
+function Get-SccHostsLines {
+    # [IO.File]::ReadAllLines returns plain strings. Get-Content decorates each
+    # line with provider note properties that explode at ConvertTo-Json.
+    param([string]$Path)
+    foreach($line in [IO.File]::ReadAllLines($Path)){if($line -and $line -notmatch '^\s*#'){[string]$line}}
+}
 function Get-SccEventRecords {
     param([hashtable]$Filter,[int]$Maximum)
     try {Get-WinEvent -FilterHashtable $Filter -MaxEvents $Maximum -ErrorAction Stop}
     catch {if($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*'){throw}}
+}
+function ConvertTo-SccWmiSubscriptionRow {
+    # Review #22: Select-Object __CLASS is always empty on a CimInstance, and the
+    # old projection dropped ExecutablePath and every ActiveScript field, so a
+    # VBScript consumer lost both its class and its payload. Read the class from
+    # CimClass and keep the command/script fields of the common consumer types.
+    param($Instance,[string]$Namespace='root\subscription')
+    $class=$null
+    $cimClass=Get-SccPropertyValue $Instance 'CimClass'
+    if($cimClass){$class=[string](Get-SccPropertyValue $cimClass 'CimClassName')}
+    if(-not $class){$class=[string](Get-SccPropertyValue $Instance '__CLASS')}
+    $row=[ordered]@{'__CLASS'=$class;Namespace=$Namespace}
+    foreach($name in @('Name','Filter','Consumer','Query','QueryLanguage','EventNamespace','CommandLineTemplate','ExecutablePath','WorkingDirectory','ScriptingEngine','ScriptFileName','ScriptText')){$row[$name]=Get-SccPropertyValue $Instance $name}
+    [pscustomobject]$row
+}
+function Get-SccLogonXPath {
+    # Review #21: the logon-type filter must run inside the event-log query.
+    # Filtering after a 500-event cap let service/network logons (types 3/5)
+    # crowd out the interactive, RDP and cached logons this section is for.
+    param([int]$Days=14,[string[]]$LogonTypes=@('2','7','10','11'))
+    $milliseconds=[int64]$Days*86400000
+    $types=@($LogonTypes | ForEach-Object {"Data[@Name='LogonType']='"+([string]$_ -replace '[^0-9]','')+"'"}) -join ' or '
+    "*[System[(EventID=4624) and TimeCreated[timediff(@SystemTime) <= $milliseconds]]] and *[EventData[$types]]"
+}
+function Get-SccXPathEventRecords {
+    param([string]$LogName,[string]$XPath,[int]$Maximum)
+    try {Get-WinEvent -LogName $LogName -FilterXPath $XPath -MaxEvents $Maximum -ErrorAction Stop}
+    catch {if($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*'){throw}}
+}
+function Get-SccScriptSweepRoots {
+    # The sweep stops at its file/time budget, so user-writable roots (where
+    # dropped scripts live) go first and Program Files last.
+    $roots=New-Object System.Collections.ArrayList
+    if($env:SystemDrive){[void]$roots.Add((Join-Path $env:SystemDrive 'Users'))}
+    if($env:SystemRoot){[void]$roots.Add((Join-Path $env:SystemRoot 'Temp'))}
+    foreach($root in @($env:ProgramData,$env:ProgramFiles,${env:ProgramFiles(x86)})){if($root){[void]$roots.Add($root)}}
+    @($roots.ToArray())
 }
 function Get-SccPersistenceInventory {
     [CmdletBinding()]
@@ -349,19 +405,19 @@ function Get-SccPersistenceInventory {
     $collectors=[ordered]@{
       TaskRegistrationEvents={Get-SccEventRecords -Filter @{LogName='Microsoft-Windows-TaskScheduler/Operational';Id=106,140,141} -Maximum 400 | Select-Object TimeCreated,Id,Message}
       Services={Get-CimInstance Win32_Service -ErrorAction Stop | Select-Object Name,DisplayName,State,StartMode,StartName,PathName}
-      WmiSubscriptions={foreach($class in @('__EventConsumer','__EventFilter','__FilterToConsumerBinding')){Get-CimInstance -Namespace root\subscription -ClassName $class -ErrorAction Stop | Select-Object __CLASS,Name,Filter,Consumer,Query,CommandLineTemplate}}
+      WmiSubscriptions={foreach($class in @('__EventConsumer','__EventFilter','__FilterToConsumerBinding')){Get-CimInstance -Namespace root\subscription -ClassName $class -ErrorAction Stop | ForEach-Object {ConvertTo-SccWmiSubscriptionRow $_}}}
       Processes={Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {(Get-SccPropertyValue $_ 'Name') -match '(?i)wscript|cscript|mshta|powershell|pwsh|rundll32|regsvr32|bitsadmin|certutil|msbuild|installutil|regasm|msiexec'} | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine}
       Connections={Get-NetTCPConnection -ErrorAction Stop | Select-Object OwningProcess,LocalAddress,LocalPort,RemoteAddress,RemotePort,State}
       Defender={ $threats=@{};foreach($threat in @(Get-MpThreat -ErrorAction Stop)){$threats[[string]$threat.ThreatID]=$threat.ThreatName};Get-MpThreatDetection -ErrorAction Stop | ForEach-Object {$d=$_;[pscustomobject]@{InitialDetectionTime=$d.InitialDetectionTime;ThreatID=$d.ThreatID;ThreatName=$threats[[string]$d.ThreatID];ProcessName=$d.ProcessName;Resources=$d.Resources;ActionSuccess=$d.ActionSuccess;DomainUser=$d.DomainUser}} }
       DefenderConfig={Get-MpPreference -ErrorAction Stop | Select-Object ExclusionPath,ExclusionProcess,ExclusionExtension,DisableRealtimeMonitoring}
       AntivirusProducts={Get-CimInstance -Namespace root\SecurityCenter2 -ClassName AntiVirusProduct -ErrorAction Stop | Select-Object displayName,productState}
-      Logons={Get-SccEventRecords -Filter @{LogName='Security';Id=4624;StartTime=(Get-Date).AddDays(-14)} -Maximum 500 | ForEach-Object {$event=$_;$data=@{};try{$xml=[xml]$event.ToXml();foreach($d in $xml.Event.EventData.Data){$data[$d.Name]=$d.'#text'}}catch{};if(@('2','7','10','11') -contains [string]$data.LogonType){[pscustomobject]@{Time=$event.TimeCreated;LogonType=$data.LogonType;User=$data.TargetUserName;IP=$data.IpAddress;Process=$data.ProcessName}}}}
+      Logons={Get-SccXPathEventRecords -LogName 'Security' -XPath (Get-SccLogonXPath -Days 14) -Maximum 500 | ForEach-Object {$event=$_;$data=@{};try{$xml=[xml]$event.ToXml();foreach($d in $xml.Event.EventData.Data){$data[$d.Name]=$d.'#text'}}catch{};if(@('2','7','10','11') -contains [string]$data.LogonType){[pscustomobject]@{Time=$event.TimeCreated;LogonType=$data.LogonType;User=$data.TargetUserName;IP=$data.IpAddress;Process=$data.ProcessName}}}}
       RdpEvents={foreach($spec in @(@('Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational',1149),@('Microsoft-Windows-TerminalServices-LocalSessionManager/Operational',21,22,24,25))){Get-SccEventRecords -Filter @{LogName=$spec[0];Id=@($spec|Select-Object -Skip 1);StartTime=(Get-Date).AddDays(-14)} -Maximum 400 | Select-Object TimeCreated,Id,Message}}
       Accounts={Get-LocalUser -ErrorAction Stop | Select-Object Name,Enabled,LastLogon,PasswordLastSet,Description}
       LocalAdministrators={Get-LocalGroupMember -Group 'Administrators' -ErrorAction Stop | Select-Object Name,ObjectClass,PrincipalSource}
       RemoteTools={Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*','HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction Stop | Where-Object {(Get-SccPropertyValue $_ 'DisplayName') -match '(?i)AnyDesk|TeamViewer|Splashtop|ScreenConnect|ConnectWise|RustDesk|UltraVNC|TightVNC|RealVNC|LogMeIn|Ammyy|Supremo|Chrome Remote|Atera|NetSupport|RemotePC|Radmin|DWService|MeshAgent|Zoho.?Assist|Action1|Level\.io|Datto|Kaseya|N-able|Syncro|Pulseway'} | Select-Object DisplayName,DisplayVersion,InstallDate,Publisher}
       RemoteToolServices={Get-Service -ErrorAction Stop | Where-Object { $serviceName=(Get-SccPropertyValue $_ 'Name'); $serviceDisplay=(Get-SccPropertyValue $_ 'DisplayName'); $remotePattern='(?i)AnyDesk|TeamViewer|ScreenConnect|ConnectWise|RustDesk|VNC|Splashtop|Atera|Kaseya|MeshAgent'; ([string]$serviceName -match $remotePattern) -or ([string]$serviceDisplay -match $remotePattern) } | Select-Object Name,DisplayName,Status,StartType}
-      Hosts={Get-Content (Join-Path $env:SystemRoot 'System32\drivers\etc\hosts') -ErrorAction Stop | Where-Object {$_ -and $_ -notmatch '^\s*#'}}
+      Hosts={Get-SccHostsLines -Path (Join-Path $env:SystemRoot 'System32\drivers\etc\hosts')}
     }
     foreach($name in $collectors.Keys){
         Write-Host ('SCC_PERSISTENCE_SECTION|'+$name)
@@ -370,10 +426,7 @@ function Get-SccPersistenceInventory {
         foreach($e in $evidence.Errors){[void]$errors.Add($e)}
         Write-Host ('SCC_PERSISTENCE_DONE|'+$name)
     }
-    $roots=@($env:ProgramData,$env:ProgramFiles,${env:ProgramFiles(x86)})
-    if($env:SystemDrive){$roots+=(Join-Path $env:SystemDrive 'Users')}
-    if($env:SystemRoot){$roots+=(Join-Path $env:SystemRoot 'Temp')}
-    $roots=@($roots | Where-Object {$_ -and (Test-Path -LiteralPath $_)})
+    $roots=@(Get-SccScriptSweepRoots | Where-Object {Test-Path -LiteralPath $_})
     Write-Host 'SCC_PERSISTENCE_SECTION|ScriptFiles'
     $scripts=Get-SccBoundedScriptFiles -Roots $roots -MaxFiles $script:InventoryMaxFiles -MaxSeconds $script:InventoryMaxSeconds
     Write-Host 'SCC_PERSISTENCE_DONE|ScriptFiles'

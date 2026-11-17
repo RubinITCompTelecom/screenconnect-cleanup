@@ -1,0 +1,81 @@
+Test,FinalResult,Notes
+tests\ci\Test-BatteryConfirmRuntime.ps1,PASS,Serial suite
+tests\ci\Test-BatteryConsoleVisibility.ps1,PASS,Serial suite
+tests\ci\Test-CLIOutputContracts.ps1,PASS,Serial suite
+tests\ci\Test-HouseRules.ps1,PASS,Serial suite
+tests\ci\Test-KeepAwakeRuntime.ps1,PASS,Passed after fixing redirected-input wait and CIM enumeration
+tests\ci\Test-LauncherElevationBound.ps1,PASS,Passed isolated rerun
+tests\ci\Test-LauncherPathWithParens.ps1,PASS,Serial suite
+tests\ci\Test-Parse.ps1,PASS,Serial suite
+tests\ci\Test-PersistenceContracts.ps1,PASS,Serial suite
+tests\ci\Test-PipelineLauncherContracts.ps1,PASS,Passed; elevated full-preflight probe skipped
+tests\ci\Test-RemovalRuntimeContracts.ps1,PASS,Serial suite
+tests\ci\Test-SafetyRegressionContracts.ps1,PASS,Serial suite
+tests\ci\Test-ScannerProcessContracts.ps1,PASS,Serial suite
+tests\ci\Test-WindowsIntegration.ps1,PASS,Passed after loading production MSI parser; passed again after hash change
+tests\gui\Test-GuiArtifactReaders.ps1,PASS,Serial suite
+tests\gui\Test-GuiAsk.ps1,PASS,Serial suite
+tests\gui\Test-GuiCallParity.ps1,PASS,Serial suite
+tests\gui\Test-GuiLauncher.ps1,PASS,Passed 37 assertions after isolating fixture and asynchronous helper
+tests\gui\Test-GuiPackageLayout.ps1,PASS,Serial suite
+tests\gui\Test-GuiPromptContract.ps1,PASS,Serial suite
+tests\gui\Test-GuiPromptHandling.ps1,PASS,Serial suite
+tests\gui\Test-GuiWindow.ps1,PASS,Serial suite
+tests\test_after_snapshot_failure_reporting.ps1,PASS,Serial suite
+tests\test_audit_fixes.ps1,PASS,Serial suite
+tests\test_auto_enable_restore_point.ps1,PASS,Serial suite
+tests\test_av_staging_validation.ps1,PASS,Serial suite
+tests\test_av_uninstaller_product_count.ps1,PASS,Serial suite
+tests\test_av_uninstaller_trust.ps1,PASS,Serial suite
+tests\test_bits_stall.ps1,PASS,Serial suite
+tests\test_bootstrap_session.ps1,PASS,Serial suite
+tests\test_clean_persistence.ps1,PASS,Serial suite
+tests\test_connectwise_report_upload.ps1,PASS,Serial suite
+tests\test_detector_connections.ps1,PASS,Serial suite
+tests\test_detector_report_share_optin.ps1,PASS,Serial suite
+tests\test_diff_evidence.ps1,PASS,Serial suite
+tests\test_direct_runner_low_space_prompt.ps1,PASS,Serial suite
+tests\test_incident_context_and_dates.ps1,PASS,Serial suite
+tests\test_malwarebytes_download_diagnostics.ps1,PASS,Serial suite
+tests\test_malwarebytes_fallback.ps1,PASS,Serial suite
+tests\test_microbin_report_html_link.ps1,PASS,Passed with installed Python instead of Store alias
+tests\test_microbin_report_upload.ps1,PASS,Passed with installed Python instead of Store alias
+tests\test_msi_uninstall_parsing.ps1,PASS,Serial suite
+tests\test_per_user_state.ps1,PASS,Serial suite
+tests\test_persistence_inventory.ps1,PASS,Serial suite
+tests\test_persistence_native_fileinfo.ps1,PASS,Serial suite
+tests\test_persistence_output_safety.ps1,PASS,Serial suite
+tests\test_persistence_overlapping_roots.ps1,PASS,Serial suite
+tests\test_persistence_progress_throughput.ps1,PASS,Serial suite
+tests\test_persistence_removal.ps1,PASS,Serial suite
+tests\test_persistence_report.ps1,PASS,Serial suite
+tests\test_persistence_review.ps1,PASS,Serial suite
+tests\test_persistence_review_safety.ps1,PASS,Serial suite
+tests\test_persistence_watchdog.ps1,PASS,Serial suite
+tests\test_persistence_workflow.ps1,PASS,Passed with Windows PowerShell host
+tests\test_power_options_repair_core.ps1,PASS,Serial suite
+tests\test_power_options_repair_entry.ps1,PASS,Serial suite
+tests\test_power_options_repair_paths.ps1,PASS,Serial suite
+tests\test_power_options_repair_report.ps1,PASS,Serial suite
+tests\test_power_options_repair_runner.ps1,PASS,Serial suite
+tests\test_power_options_repair_windows.ps1,PASS,Serial suite
+tests\test_power_options_repair_workflow.ps1,PASS,Serial suite
+tests\test_preflight_low_space_prompt.ps1,SKIP,Requires elevated Windows host
+tests\test_report_av_error_escaping.ps1,PASS,Serial suite
+tests\test_report_scanner_section.ps1,PASS,Serial suite
+tests\test_resume_materials_trust.ps1,PASS,Serial suite
+tests\test_review_wrapper_low_space_prompt.ps1,PASS,Serial suite
+tests\test_review_wrapper_outcome.ps1,PASS,Serial suite
+tests\test_run_artifact_copies.ps1,PASS,Serial suite
+tests\test_scanner_findings_parser.ps1,PASS,Serial suite
+tests\test_scanner_signature_trust.ps1,PASS,Serial suite
+tests\test_snapshot_admin_sid_pid_map.ps1,PASS,Serial suite
+tests\test_snapshot_section_shapes.ps1,PASS,Serial suite
+tests\Test-KeepSelection.ps1,PASS,Serial suite
+tests\Test-PhaseSplit.ps1,PASS,Serial suite
+tests\Test-RunRootBaseLock.ps1,PASS,Serial suite
+tests\test_diff_synthetic.py,PASS,Serial suite
+tests\test_power_options_repair_package.py,PASS,Passed with PYTHON set to installed Python and Git Bash on PATH
+relay.test_report_relay,PASS,Serial suite
+relay.test_export_iocs,PASS,Serial suite
+tests\test_quarantine_hash_evidence.ps1,PASS,Source read counts; evidence identity; tampering; junction refusal

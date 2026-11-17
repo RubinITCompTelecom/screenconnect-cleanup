@@ -63,6 +63,13 @@ try {
                         SHA256 = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
                         SignatureStatus = 'NotSigned'
                     }
+                    [ordered]@{ Path = 'C:\Windows.old\Users\Carol\a.exe'; SHA256 = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' }
+                    [ordered]@{ Path = '\HOST\c$\Users\Dave\b.exe'; SHA256 = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' }
+                    [ordered]@{ Path = 'C:/Users/Erin/c.exe'; SHA256 = 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd' }
+                    [ordered]@{ Path = 'C:\Documents and Settings\Frank\d.exe'; SHA256 = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' }
+                )
+                Connections = @(
+                    [ordered]@{ LocalAddress = '192.168.77.5'; LocalPort = 51234; RemoteAddress = '203.0.113.9'; RemotePort = 443; State = 'Established' }
                 )
             }
         )
@@ -96,6 +103,8 @@ try {
         Check 'installation identifier is retained' ($report.ScreenConnect.Instances[0].Identifier -eq 'ABCDEF123456') $reportText
         Check 'relay host is retained' ($report.ScreenConnect.Instances[0].RelayHost -eq 'evil-relay.example') $reportText
         Check 'secret fields are omitted' ($reportText -notmatch 'do-not-upload-this-secret' -and $reportText -notmatch 'RunAsUser') $reportText
+        Check 'user names are hidden in Windows.old, UNC, forward-slash and Documents and Settings paths' ($reportText -notmatch 'Carol|Dave|Erin|Frank') $reportText
+        Check 'LocalAddress is not reported' ($reportText -notmatch 'LocalAddress|192\.168\.77\.5') $reportText
         Check 'user profile paths are normalized' ($reportText -notmatch 'C:' + [regex]::Escape('\Users\Alice') -and $reportText -match 'USERPROFILE') $reportText
     } finally {
         $archive.Dispose()

@@ -360,9 +360,16 @@
               <StackPanel>
                 <TextBlock FontSize="14" FontWeight="SemiBold" Text="Online - scanners and sharing (needs internet)"/>
                 <TextBlock Style="{StaticResource Text.Muted}" Margin="0,3,0,0"
-                           Text="Downloads the scanners, runs KVRT, ESET and Malwarebytes, checks persistence again, optional antivirus uninstall, shares the report. Continues the offline run for this PC when there is one."/>
+                           Text="Downloads the scanners, runs KVRT, ESET and Malwarebytes, checks persistence again, optional antivirus uninstall, shares the report if the box below is ticked. Continues the offline run for this PC when there is one; when there is none, it offers to run the cleanup first."/>
               </StackPanel>
             </RadioButton>
+            <!-- Online only: share the sanitized report to the MicroBin server (microbin-url.txt). Shown when Online is chosen. -->
+            <StackPanel x:Name="SharePanel" Margin="48,-4,0,12" Visibility="Collapsed">
+              <CheckBox x:Name="CbShare" IsChecked="True" Foreground="{DynamicResource Brush.Foreground}"
+                        Content="Share the sanitized report (read-only link, deleted after one week)"/>
+              <TextBlock Style="{StaticResource Text.Muted}" FontSize="12" Margin="22,4,0,0" TextWrapping="Wrap"
+                         Text="Nothing personal is sent: no computer name (an anonymous PC ID is used), no user or account names, no network address of this PC, no passwords, keys, documents or raw settings, and user folder names are hidden. Sent: the ScreenConnect relay hosts, instance IDs, file names and hashes, and install dates. This is not a report to ConnectWise; it gives you one link with what ConnectWise needs. Untick to keep everything on this PC."/>
+            </StackPanel>
             <RadioButton x:Name="RbDetect" GroupName="Mode" Style="{StaticResource ModeCard}">
               <StackPanel>
                 <TextBlock FontSize="14" FontWeight="SemiBold" Text="Detect only - nothing is changed"/>
@@ -408,6 +415,15 @@
                 </TextBlock.Style>
               </TextBlock>
               <ProgressBar x:Name="Busy" IsIndeterminate="False" Minimum="0" Maximum="1" Value="0"/>
+              <StackPanel x:Name="ScanControls" Margin="0,10,0,0" Visibility="Collapsed">
+                <WrapPanel>
+                  <Button x:Name="BtnPauseScan" Style="{StaticResource Button.Secondary}" Content="Pause after scan"
+                          ToolTip="Let this tool scan finish, then wait before the next step."/>
+                  <Button x:Name="BtnStopScan" Style="{StaticResource Button.Secondary}" Content="Stop scan"
+                          ToolTip="Cancel this tool scan and stop the run before later steps."/>
+                </WrapPanel>
+                <TextBlock x:Name="ScanControlHint" Style="{StaticResource Text.Muted}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+              </StackPanel>
             </StackPanel>
           </Border>
           <Border x:Name="Banner" Grid.Row="1" Margin="0,10,0,0" Padding="14,10" BorderThickness="1" CornerRadius="{StaticResource Radius.Card}"

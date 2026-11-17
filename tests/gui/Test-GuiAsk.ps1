@@ -83,7 +83,7 @@ try {
     $seen = Invoke-Walk $s $yes
     $txt = $seen -join ' '
     # (8c, the diff, is skipped here: this walk runs no scripts, so no after-snapshot exists.)
-    Check ($txt -match '^2 3 4 ASK:KeepSelection@5 5 6d ASK:OpenReview@6e 6e ASK:PowerRepair@8a 8a 8b (8c )?9a 9b 9c M$') ('order: ' + $txt)
+    Check ($txt -match '^2 3 4 ASK:KeepSelection@5 5 6d ASK:OpenReview@6e 6e ASK:PowerRepair@8a 8a 8b (8c )?9a 9a 9b 9c M$') ('order: ' + $txt)
     $five = @($s.Results | Where-Object { $_.StepId -eq '5' })[0]
     Check ($null -ne $five) 'step 5 ran after its question'
 
@@ -137,6 +137,59 @@ try {
     $s = New-Walk 'Detect' -Interactive
     $seen = Invoke-Walk $s $yes
     Check (@($seen | Where-Object { $_ -like 'ASK:*' }).Count -eq 0) 'detect only asks nothing'
+
+    Write-Host 'Online share tick box (ShareReport)' -ForegroundColor Cyan
+    $shareCall = @(@((Get-GuiCatalog).Steps | Where-Object { $_.Id -eq '9o' })[0].Calls)[0]
+    $s = New-GuiSession -Mode Online -ToolRoot $ToolRoot -RitRoot (Join-Path $work 'share-default')
+    Check ([bool]$s.Answers['ShareReport']) 'sharing is ticked by default'
+    $args9o = @(Expand-GuiArgs -Session $s -Template $shareCall.Args)
+    Check ($args9o -notcontains '-NoUpload') 'ticked: the online share step uploads (no -NoUpload)'
+    $s = New-GuiSession -Mode Online -ToolRoot $ToolRoot -RitRoot (Join-Path $work 'share-off') -Answers @{ ShareReport = $false }
+    $args9o = @(Expand-GuiArgs -Session $s -Template $shareCall.Args)
+    Check ($args9o -contains '-NoUpload') 'unticked: the online share step builds the package with -NoUpload'
+    $s.RunRoot = Join-Path $work 'share-off'
+    $fake = [pscustomobject]@{ Kind = 'Script'; Index = 0; Ask = ''; Title = 'Share the report'; Destructive = $false; Builtin = $null; ScriptPath = ''; Args = @(); StepId = '9o'; Call = $shareCall; Entry = [pscustomobject]@{ StepId = '9o'; StepTitle = 'Share the report'; Group = 'Report'; Destructive = $false; Call = $shareCall } }
+    $o = Complete-GuiAction -Session $s -Action $fake -ExitCode 0
+    Check (-not [bool]$s.Shared) 'unticked: the run is not marked shared (nothing was uploaded)'
+    Check ([bool]$s.ShareBuilt) 'unticked: the package step still ran clean, so the Desktop copy IS refreshed (review #16)'
+    Check ($o.Message -like '*nothing was uploaded*') 'unticked: the share step says nothing was uploaded'
+    $refresh = @(@((Get-GuiCatalog).Steps | Where-Object { $_.Id -eq '9q' })[0].Calls)[0]
+    Check (@($refresh.When) -contains 'Flag:ShareBuilt' -and @($refresh.When) -notcontains 'Flag:Shared') 'the Desktop refresh (9q) follows ShareBuilt, not Shared'
+    Check (Test-GuiCondition -Session $s -Condition 'Flag:ShareBuilt') 'unticked: the Desktop refresh condition holds'
+    $s9 = New-GuiSession -Mode Online -ToolRoot $ToolRoot -RitRoot (Join-Path $work 'share-off') -Answers @{ ShareReport = $false }
+    $t9o = @($s9.Plan | Where-Object { $_.StepId -eq '9o' })[0].StepTitle
+    Check ($t9o -notlike 'Shar*' -and $t9o -like '*unticked*') ('unticked: the stepper does not say "Sharing" for 9o (' + $t9o + ')')
+    $s9.RunRoot = Join-Path $work 'share-off'
+    $null = New-Item -ItemType Directory -Path $s9.RunRoot -Force
+    Set-Content -LiteralPath (Join-Path $s9.RunRoot 'report-after-scans.html') -Value '<html></html>' -Encoding ASCII
+    $call9r = @(@((Get-GuiCatalog).Steps | Where-Object { $_.Id -eq '9r' })[0].Calls | Where-Object { $_.Script -eq 'New-InvestigationReport.ps1' })[0]
+    $fake9r = [pscustomobject]@{ Kind = 'Script'; Index = 0; Ask = ''; Title = 'r'; Destructive = $false; Builtin = $null; ScriptPath = ''; Args = @(); StepId = '9r'; Call = $call9r; Entry = [pscustomobject]@{ StepId = '9r'; StepTitle = 'r'; Group = 'Report'; Destructive = $false; Call = $call9r } }
+    $o = Complete-GuiAction -Session $s9 -Action $fake9r -ExitCode 0
+    Check ($o.Message -notlike 'Sharing*' -and $o.Message -like '*sharing is unticked*') 'unticked: the after-scans rebuild (9r) does not say "Sharing"'
+    Check ($s9.ShareReport -like '*report-after-scans.html') 'unticked: the Desktop refresh copies the after-scans report'
+    $s = New-GuiSession -Mode Online -ToolRoot $ToolRoot -RitRoot (Join-Path $work 'share-on')
+    $s.RunRoot = Join-Path $work 'share-on'
+    [void](Complete-GuiAction -Session $s -Action $fake -ExitCode 0)
+    Check ([bool]$s.Shared -and [bool]$s.ShareBuilt) 'ticked: a successful share marks the run shared'
+    Check (@($s.Plan | Where-Object { $_.StepId -eq '9o' })[0].StepTitle -eq 'Share the report') 'ticked: 9o keeps its title'
+    $s = New-GuiSession -Mode Online -ToolRoot $ToolRoot -RitRoot (Join-Path $work 'share-fail')
+    $s.RunRoot = Join-Path $work 'share-fail'
+    [void](Complete-GuiAction -Session $s -Action $fake -ExitCode 1)
+    Check (-not [bool]$s.Shared -and -not [bool]$s.ShareBuilt) 'a failed share step refreshes nothing'
+
+    Write-Host 'Uploader output: link, skipped, disabled' -ForegroundColor Cyan
+    Check ((Get-GuiShareUrl @('x', 'MICROBIN UPLOAD: https://p.example.invalid/p/a1')) -eq 'https://p.example.invalid/p/a1') 'the paste link is read'
+    Check ((Get-GuiShareUrl @('MICROBIN UPLOAD: skipped; no MicroBin server URL is configured')) -eq '') 'a skipped upload is not mistaken for a link'
+    Check ((Get-GuiShareSkipped @('MICROBIN UPLOAD: skipped; no MicroBin server URL is configured')) -eq 'no MicroBin server URL is configured') 'a skipped upload is detected with its reason (review #18)'
+    Check ((Get-GuiShareSkipped @('MICROBIN UPLOAD: disabled by operator', 'MICROBIN UPLOAD: https://p.example.invalid/p/a1')) -eq '') 'an unticked (disabled) or real upload is not a skip'
+    $uploader = [IO.File]::ReadAllText((Join-Path $ToolRoot 'Submit-ConnectWiseReport.ps1'))
+    $m = [regex]::Match($uploader, "Write-Host 'MICROBIN UPLOAD: (skipped[^']*)'")
+    Check ($m.Success -and (Get-GuiShareSkipped @('MICROBIN UPLOAD: ' + $m.Groups[1].Value)) -ne '') 'the skip line the real uploader prints is recognised'
+    $s = New-GuiSession -Mode Offline -ToolRoot $ToolRoot -RitRoot (Join-Path $work 'share-offline') -Answers @{ ShareReport = $true }
+    $sub = @(@((Get-GuiCatalog).Steps | Where-Object { $_.Id -eq '9b' })[0].Calls)[0]
+    Check (@(Expand-GuiArgs -Session $s -Template $sub.Args) -contains '-NoUpload') 'the offline half never uploads, whatever the tick box says'
+    $s = New-GuiSession -Mode Full -ToolRoot $ToolRoot -RitRoot (Join-Path $work 'share-full') -Answers @{ ShareReport = $false }
+    Check (@(Expand-GuiArgs -Session $s -Template $sub.Args) -contains '-NoUpload') 'cleanup-first full mode preserves unticked sharing in the report call'
 
     Write-Host 'Answers are validated' -ForegroundColor Cyan
     $s = New-Walk 'Full' -Interactive

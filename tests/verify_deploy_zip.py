@@ -55,7 +55,7 @@ def verify(path, version, commit):
             "Persistence.Inventory.psm1", "Persistence.Removal.psm1",
             "SystemRestore.psm1",
             "Repair-PowerOptions.ps1", "PowerOptionsRepair.Core.psm1", "PowerOptionsRepair.Windows.psm1",
-            "New-InvestigationReport.ps1", "Submit-ConnectWiseReport.ps1",
+            "New-InvestigationReport.ps1", "Submit-ConnectWiseReport.ps1", "Write-ScannerSummary.ps1",
             "tools/Keep-Awake.ps1", "tools/Confirm-OnBattery.ps1",
             "START-HERE-OFFLINE.bat", "START-HERE-ONLINE.bat", "OFFLINE-ONLINE-SPLIT.md",
             "tools/Find-OfflineRun.ps1", "tools/Write-PhaseMarker.ps1", "tools/RunRootSecurity.psm1",

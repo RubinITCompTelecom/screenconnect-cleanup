@@ -1179,7 +1179,7 @@ $stage8Result = Invoke-Stage -StageId 8 -StageName 'Snapshot (After)+Diff' -Skip
             Write-StageLog 'Repair-PowerOptions.ps1 is missing; the optional repair did not run.' 'Error'
             $powerOptionsRepairExitCode = 4
         } else {
-            $repairArgs = @('-Apply', '-Confirm:$false', '-WorkDir', $WorkDir, '-ResultPath', $powerOptionsRepairPath)
+            $repairArgs = @('-Apply', '-WorkDir', $WorkDir, '-ResultPath', $powerOptionsRepairPath)
             if ($resetLocalGpoConsent) { $repairArgs += '-ResetLocalGpo' }
             if ($AllowManagedDevice) { $repairArgs += '-AllowManagedDevice' }
             Write-StageLog 'Running the consented power-options repair before the after snapshot.'
@@ -1218,6 +1218,8 @@ $stage8Result = Invoke-Stage -StageId 8 -StageName 'Snapshot (After)+Diff' -Skip
 
     if (Test-Path $diffScript) {
         $diffArgs = @('-Before', $beforeSnapshot, '-After', $afterSnapshot, '-OutFile', $diffPath)
+        $diffManifest = Join-Path $WorkDir 'removal-manifest.json'
+        if (Test-Path -LiteralPath $diffManifest -PathType Leaf) { $diffArgs += @('-ManifestPath', $diffManifest) }
         $rc = Invoke-ChildScript -ScriptPath $diffScript -ArgumentList $diffArgs -LogTag 'Diff'
         # diff-snapshots.ps1: 0 = CLEAN, 1 = RESURRECTION or INCOMPLETE,
         # 2 = failure. Exit code 1 is a finding, not a launcher error.

@@ -44,7 +44,7 @@ class PowerRepairPackageTests(unittest.TestCase):
             with zipfile.ZipFile(archives[0]) as archive:
                 self.assertIsNone(archive.testzip())
                 for name in ("Repair-PowerOptions.ps1", "PowerOptionsRepair.Core.psm1",
-                             "PowerOptionsRepair.Windows.psm1"):
+                             "PowerOptionsRepair.Windows.psm1", "Write-ScannerSummary.ps1"):
                     # Everything but the top START-HERE-GUI.bat lives in files/.
                     member = "screenconnect-cleanup/files/" + name
                     self.assertIn(member, archive.namelist(), f"Required repair dependency not packaged: {name}")

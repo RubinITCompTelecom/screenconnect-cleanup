@@ -113,19 +113,50 @@ function Test-SccRunRootTrusted {
     }
 }
 
+function Protect-SccBaseFolder {
+    <#
+      Locks the base folder (C:\RIT-SCC) that holds the run folders: same shape as a run folder
+      (Administrators + SYSTEM full, Users read/execute, no inheritance from C:\). Without this
+      the base inherits "Authenticated Users: Modify" from C:\ and the reboot-resume trust check
+      (Test-ResumeMaterialsTrusted walks every ancestor) refuses to register the resume task,
+      because Users could delete or swap the run folder beneath it. Users keep READ because the
+      report and the GUI are opened by a normal (non-elevated) account; nothing non-elevated writes here.
+    #>
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $di = New-Object System.IO.DirectoryInfo($Path)
+    if ($PSVersionTable.PSEdition -eq 'Desktop') { $di.SetAccessControl((New-SccRunRootSecurity)) }
+    else { [IO.FileSystemAclExtensions]::SetAccessControl($di, (New-SccRunRootSecurity)) }
+}
+function New-SccSecuredDirectory {
+    param([string]$Path)
+    $security = New-SccRunRootSecurity
+    if ($PSVersionTable.PSEdition -eq 'Desktop') { [IO.Directory]::CreateDirectory($Path, $security) }
+    else { [IO.FileSystemAclExtensions]::CreateDirectory($security, $Path) }
+}
 function New-SccProtectedRunRoot {
     <#
       Creates <Root>\<COMPUTERNAME>-<guid> already locked (see the top of this file) and returns
       its path. Throws when the folder cannot be created locked or does not verify afterwards.
     #>
     param([string]$Root = 'C:\RIT-SCC')
-    if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
-        $null = New-Item -ItemType Directory -Path $Root -Force -ErrorAction Stop
+    if (Test-Path -LiteralPath $Root) {
+        # Checked BEFORE any ACL is touched: never follow a junction/symlink planted at the base.
+        if (Test-SccIsReparsePoint $Root) { throw ($Root + ' is a junction or symlink; refusing to create a run folder under it.') }
+        if (-not (Test-Path -LiteralPath $Root -PathType Container)) { throw ($Root + ' exists but is not a folder.') }
+        # Left over from an older version (or created by hand): re-apply the lock.
+        Protect-SccBaseFolder -Path $Root
+    } else {
+        # Created with its security descriptor in one call: never exists with the inherited ACL.
+        $null = New-SccSecuredDirectory -Path $Root
+        if (Test-SccIsReparsePoint $Root) { throw ($Root + ' is a junction or symlink; refusing to create a run folder under it.') }
     }
-    if (Test-SccIsReparsePoint $Root) { throw ($Root + ' is a junction or symlink; refusing to create a run folder under it.') }
+    $baseReason = ''
+    if (-not (Test-SccRunRootTrusted -RunRoot $Root -Reason ([ref]$baseReason))) {
+        throw ('Base folder ' + $Root + ' did not verify as locked: ' + $baseReason)
+    }
     $path = Join-Path $Root ($env:COMPUTERNAME + '-' + [guid]::NewGuid().ToString('N'))
     if (Test-Path -LiteralPath $path) { throw ('Run folder already exists: ' + $path) }
-    $null = [IO.Directory]::CreateDirectory($path, (New-SccRunRootSecurity))
+    $null = New-SccSecuredDirectory -Path $path
     $reason = ''
     if (-not (Test-SccRunRootTrusted -RunRoot $path -Reason ([ref]$reason))) {
         throw ('New run folder did not verify as locked: ' + $reason)

@@ -343,6 +343,8 @@ exit 0
     $probeRc = $LASTEXITCODE
     if ($probeRc -ne 0 -and ($probeOutput -match '\$Debug.*has not been set')) {
         Add-Failure 'C9' ("preflight.ps1 normal run reads unbound `$Debug under StrictMode (exit {0})." -f $probeRc)
+    } elseif ($probeRc -eq 1 -and ($probeOutput -match 'FAIL: Not running elevated')) {
+        Write-Host 'SKIP: C9 full preflight success requires an elevated test host (binding and Debug guard reached).'
     } elseif ($probeRc -ne 0) {
         Add-Failure 'C9' ("preflight.ps1 safe no- Debug probe failed for another reason (exit {0}). Output: {1}" -f $probeRc, ($probeOutput -join ' | '))
     }

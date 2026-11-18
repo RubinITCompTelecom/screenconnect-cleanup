@@ -153,7 +153,7 @@
                    "-PersistenceRemoval", "{RunRoot}\\persistence\\removal.json",
                    "-PersistenceResult", "{RunRoot}\\persistence\\result.json",
                    "{@PowerArg}", "{@ScannerArgs}",
-                   "-OutputPath", "{RunRoot}/report.html"],
+                   "-DiffPath", "{RunRoot}\\snapshot_diff.json", "-OutputPath", "{RunRoot}/report.html"],
           "When": ["Has:FindingsJson", "Exists:{FindingsJson}"], "SkipText": "No current-run findings.json available - the report is skipped.",
           "After": "MarkReport", "OnNonZero": "WarnPipe", "NonZeroText": "Report generation failed." }
       ]
@@ -191,7 +191,7 @@
                    "-PersistenceRemoval", "{PersistWorkDir}\\persistence\\removal.json",
                    "-PersistenceResult", "{PersistWorkDir}\\persistence\\result.json",
                    "{@PowerArgBs}", "{@ScannerArgs}",
-                   "-OutputPath", "{OnlineReport}"],
+                   "-DiffPath", "{RunRoot}\\snapshot_diff.json", "-OutputPath", "{OnlineReport}"],
           "When": ["Not:ScannerOnly", "Has:FindingsJson"],
           "SkipText": "No Offline findings for a combined report; nothing will be shared.",
           "OnMissing": "WarnPipeSkip", "OnNonZero": "WarnPipe", "After": "MarkAfterScansReport" }

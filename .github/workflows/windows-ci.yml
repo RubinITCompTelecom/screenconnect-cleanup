@@ -288,7 +288,7 @@ jobs:
       - name: Review repair regressions (Windows PowerShell 5.1, fixtures only)
         shell: powershell
         run: |
-          foreach ($test in @('tests/Test-RunRootBaseLock.ps1', 'tests/test_av_uninstaller_product_count.ps1', 'tests/test_av_uninstaller_trust.ps1', 'tests/test_bits_stall.ps1', 'tests/test_clean_persistence.ps1', 'tests/test_detector_report_share_optin.ps1', 'tests/test_msi_uninstall_parsing.ps1', 'tests/test_per_user_state.ps1', 'tests/test_quarantine_hash_evidence.ps1', 'tests/test_review_wrapper_outcome.ps1', 'tests/test_scanner_signature_trust.ps1', 'tests/test_snapshot_admin_sid_pid_map.ps1', 'tests/test_diff_registry_identity.ps1', 'tests/test_user_uninstall_handoff.ps1', 'tests/test_current_profile_redirection.ps1', 'tests/test_scanner_summary_contract.ps1', 'tests/gui/Test-GuiUnknownPrompt.ps1', 'tests/gui/Test-GuiScannerSummary.ps1', 'tests/test_ci_review_regressions.ps1')) {
+          foreach ($test in @('tests/test_quarantine_outcome_gates.ps1', 'tests/test_guided_diff_reporting.ps1', 'tests/test_report_diff_metadata.ps1', 'tests/test_report_relative_output.ps1', 'tests/test_report_threat_shapes.ps1', 'tests/Test-RunRootBaseLock.ps1', 'tests/test_av_uninstaller_product_count.ps1', 'tests/test_av_uninstaller_trust.ps1', 'tests/test_bits_stall.ps1', 'tests/test_clean_persistence.ps1', 'tests/test_detector_report_share_optin.ps1', 'tests/test_msi_uninstall_parsing.ps1', 'tests/test_per_user_state.ps1', 'tests/test_quarantine_hash_evidence.ps1', 'tests/test_review_wrapper_outcome.ps1', 'tests/test_scanner_signature_trust.ps1', 'tests/test_snapshot_admin_sid_pid_map.ps1', 'tests/test_diff_registry_identity.ps1', 'tests/test_user_uninstall_handoff.ps1', 'tests/test_current_profile_redirection.ps1', 'tests/test_scanner_summary_contract.ps1', 'tests/gui/Test-GuiUnknownPrompt.ps1', 'tests/gui/Test-GuiScannerSummary.ps1', 'tests/test_ci_review_regressions.ps1')) {
             powershell.exe -NoProfile -ExecutionPolicy Bypass -File $test
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
@@ -296,7 +296,7 @@ jobs:
       - name: Review repair regressions (pwsh, fixtures only)
         shell: pwsh
         run: |
-          foreach ($test in @('tests/Test-RunRootBaseLock.ps1', 'tests/test_av_uninstaller_product_count.ps1', 'tests/test_av_uninstaller_trust.ps1', 'tests/test_bits_stall.ps1', 'tests/test_clean_persistence.ps1', 'tests/test_detector_report_share_optin.ps1', 'tests/test_msi_uninstall_parsing.ps1', 'tests/test_per_user_state.ps1', 'tests/test_quarantine_hash_evidence.ps1', 'tests/test_review_wrapper_outcome.ps1', 'tests/test_scanner_signature_trust.ps1', 'tests/test_snapshot_admin_sid_pid_map.ps1', 'tests/test_diff_registry_identity.ps1', 'tests/test_user_uninstall_handoff.ps1', 'tests/test_current_profile_redirection.ps1', 'tests/test_scanner_summary_contract.ps1', 'tests/gui/Test-GuiUnknownPrompt.ps1', 'tests/gui/Test-GuiScannerSummary.ps1', 'tests/test_ci_review_regressions.ps1')) {
+          foreach ($test in @('tests/test_quarantine_outcome_gates.ps1', 'tests/test_guided_diff_reporting.ps1', 'tests/test_report_diff_metadata.ps1', 'tests/test_report_relative_output.ps1', 'tests/test_report_threat_shapes.ps1', 'tests/Test-RunRootBaseLock.ps1', 'tests/test_av_uninstaller_product_count.ps1', 'tests/test_av_uninstaller_trust.ps1', 'tests/test_bits_stall.ps1', 'tests/test_clean_persistence.ps1', 'tests/test_detector_report_share_optin.ps1', 'tests/test_msi_uninstall_parsing.ps1', 'tests/test_per_user_state.ps1', 'tests/test_quarantine_hash_evidence.ps1', 'tests/test_review_wrapper_outcome.ps1', 'tests/test_scanner_signature_trust.ps1', 'tests/test_snapshot_admin_sid_pid_map.ps1', 'tests/test_diff_registry_identity.ps1', 'tests/test_user_uninstall_handoff.ps1', 'tests/test_current_profile_redirection.ps1', 'tests/test_scanner_summary_contract.ps1', 'tests/gui/Test-GuiUnknownPrompt.ps1', 'tests/gui/Test-GuiScannerSummary.ps1', 'tests/test_ci_review_regressions.ps1')) {
             pwsh -NoProfile -File $test
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
@@ -317,6 +317,10 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
+      - name: Immutable bundle provenance (isolated Git fixtures)
+        shell: pwsh
+        run: python ./tests/test_bundle_provenance.py
+
       - name: Build allowlisted testing ZIP from the tested checkout
         shell: bash
         env:
@@ -336,7 +340,7 @@ jobs:
           # Since 1.8.12-gui-alpha.3 the zip holds START-HERE-GUI.bat at the top and every script in files\.
           $package = Join-Path (Join-Path $extract 'screenconnect-cleanup') 'files'
           New-Item -ItemType Directory -Path (Join-Path $package 'tests') | Out-Null
-          foreach ($test in @('test_persistence_inventory.ps1', 'test_persistence_removal.ps1', 'test_persistence_report.ps1', 'test_persistence_workflow.ps1', 'test_persistence_output_safety.ps1', 'test_persistence_native_fileinfo.ps1', 'test_persistence_watchdog.ps1', 'test_persistence_review.ps1', 'test_persistence_progress_throughput.ps1', 'test_persistence_overlapping_roots.ps1', 'test_persistence_review_safety.ps1', 'test_after_snapshot_failure_reporting.ps1', 'test_report_av_error_escaping.ps1', 'test_snapshot_section_shapes.ps1', 'test_audit_fixes.ps1', 'test_bootstrap_session.ps1', 'test_resume_materials_trust.ps1', 'test_auto_enable_restore_point.ps1', 'test_power_options_repair_core.ps1', 'test_power_options_repair_entry.ps1', 'test_power_options_repair_report.ps1', 'test_power_options_repair_runner.ps1', 'test_power_options_repair_windows.ps1', 'test_power_options_repair_paths.ps1', 'test_power_options_repair_workflow.ps1')) {
+          foreach ($test in @('test_quarantine_outcome_gates.ps1', 'test_guided_diff_reporting.ps1', 'test_report_diff_metadata.ps1', 'test_report_relative_output.ps1', 'test_report_threat_shapes.ps1', 'test_persistence_inventory.ps1', 'test_persistence_removal.ps1', 'test_persistence_report.ps1', 'test_persistence_workflow.ps1', 'test_persistence_output_safety.ps1', 'test_persistence_native_fileinfo.ps1', 'test_persistence_watchdog.ps1', 'test_persistence_review.ps1', 'test_persistence_progress_throughput.ps1', 'test_persistence_overlapping_roots.ps1', 'test_persistence_review_safety.ps1', 'test_after_snapshot_failure_reporting.ps1', 'test_report_av_error_escaping.ps1', 'test_snapshot_section_shapes.ps1', 'test_audit_fixes.ps1', 'test_bootstrap_session.ps1', 'test_resume_materials_trust.ps1', 'test_auto_enable_restore_point.ps1', 'test_power_options_repair_core.ps1', 'test_power_options_repair_entry.ps1', 'test_power_options_repair_report.ps1', 'test_power_options_repair_runner.ps1', 'test_power_options_repair_windows.ps1', 'test_power_options_repair_paths.ps1', 'test_power_options_repair_workflow.ps1')) {
             $copied = Join-Path (Join-Path $package 'tests') $test
             Copy-Item -LiteralPath (Join-Path 'tests' $test) -Destination $copied
             powershell.exe -NoProfile -ExecutionPolicy Bypass -File $copied

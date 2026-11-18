@@ -117,7 +117,7 @@ function New-GuiSession {
 
     return [pscustomobject]@{
         Mode = $Mode; Phase = $phase; ToolRoot = $root; RitRoot = $RitRoot; ComputerName = $ComputerName
-        RunRoot = ''; FindingsJson = ''; PriorFindings = ''
+        RunRoot = ''; FindingsJson = ''; PriorFindings = ''; OnlineWorkDir = ''; AfterScansReportReady = $false
         PipeRc = 0; PowerRepairRan = $false; ReportRc = 0; ReportOpened = $false
         # Shared = the report was really uploaded; ShareBuilt = the share step ran clean (with or without
         # the upload), so the Desktop copy is refreshed either way (batch :online_share refreshes on exit 0).
@@ -203,11 +203,19 @@ function Initialize-GuiRunRoot {
         $Session.RunRoot = [string]$Prior.RunRoot
         $Session.FindingsJson = [string]$Prior.FindingsJson
         $Session.PriorFindings = [string]$Prior.FindingsJson
-        return $Session.RunRoot
+    } else {
+        if ($kind -eq 'prior-or-new') { $Session.ScannerOnly = $true }
+        if ($kind -eq 'new-locked' -or $Session.Phase -eq 'ONLINE') { [void](New-GuiLockedRunRoot -Session $Session) }
+        else { [void](New-GuiRunRoot -Session $Session) }
     }
-    if ($kind -eq 'prior-or-new') { $Session.ScannerOnly = $true }
-    if ($kind -eq 'new-locked') { return (New-GuiLockedRunRoot -Session $Session) }
-    return (New-GuiRunRoot -Session $Session)
+    if ($Session.Phase -eq 'ONLINE') {
+        $cmd = "Import-Module (Join-Path `$env:SCC_DP0 'tools\RunRootSecurity.psm1'); New-SccOnlineAttempt -RunRoot '" + $Session.RunRoot.Replace("'", "''") + "'"
+        $r = Invoke-GuiCapture -Arguments ('-NoProfile -ExecutionPolicy Bypass -Command ' + (ConvertTo-GuiArg $cmd)) -Environment @{ SCC_DP0 = $Session.ToolRoot }
+        $path = $(if (@($r.Lines).Count -gt 0) { $r.Lines[-1].Trim() } else { '' })
+        if ($r.ExitCode -ne 0 -or -not $path -or -not (Test-Path -LiteralPath $path -PathType Container)) { throw ('Could not create a fresh Online attempt: ' + $r.Error) }
+        $Session.OnlineWorkDir = $path
+    }
+    return $Session.RunRoot
 }
 
 function New-GuiLockedRunRoot {
@@ -233,23 +241,37 @@ function New-GuiLockedRunRoot {
 # ---------------------------------------------------------------------------------------
 
 function Get-GuiShareTargets {
-    # What the online half shares: the offline report.html and persistence results, unless the
-    # after-scans report was rebuilt (step 9r), in which case those (batch: SCC_SHARE_REPORT / SCC_SHARE_PDIR).
+    # Online sharing always targets this attempt's report and evidence. Never fall back to Offline.
     param($Session)
     $report = [string]$Session.ShareReport
     $pdir = [string]$Session.SharePDir
-    if (-not $report) { $report = [string]$Session.RunRoot + '\report.html' }
-    if (-not $pdir) { $pdir = [string]$Session.RunRoot + '\persistence' }
+    if (-not $report) { $report = $(if ($Session.Phase -eq 'ONLINE') { Get-GuiOnlineReportPath $Session } else { [string]$Session.RunRoot + '\report.html' }) }
+    if (-not $pdir) { $pdir = (Get-GuiWorkDir $Session) + '\persistence' }
     return [pscustomobject]@{ Report = $report; PDir = $pdir }
+}
+
+function Get-GuiWorkDir {
+    param($Session)
+    if ($Session.Phase -eq 'ONLINE') {
+        if ($Session.OnlineWorkDir) { return [string]$Session.OnlineWorkDir }
+        return ([string]$Session.RunRoot + '\after-scans')
+    }
+    return [string]$Session.RunRoot
+}
+
+function Get-GuiOnlineReportPath {
+    param($Session)
+    if (-not $Session.RunRoot) { return '' }
+    return (Join-Path $Session.RunRoot ('report-' + (Split-Path -Leaf (Get-GuiWorkDir $Session)) + '.html'))
 }
 
 function Expand-GuiTokens {
     param($Session, [string]$Text)
     $share = Get-GuiShareTargets -Session $Session
-    # The online half's persistence check runs again after the scanners, into after-scans (batch :persist_after_scans).
-    $persistDir = [string]$Session.RunRoot
-    if ($Session.Phase -eq 'ONLINE') { $persistDir = [string]$Session.RunRoot + '\after-scans' }
-    return $Text.Replace('{ToolRoot}', $Session.ToolRoot).Replace('{RunRoot}', [string]$Session.RunRoot).Replace('{FindingsJson}', [string]$Session.FindingsJson).Replace('{PipeRc}', [string]$Session.PipeRc).Replace('{PersistWorkDir}', $persistDir).Replace('{SharePDir}', $share.PDir).Replace('{ShareReport}', $share.Report)
+    # The Online attempt directory is shared by scanner results and persistence, separate from Offline.
+    $persistDir = Get-GuiWorkDir $Session
+    $onlineReport = $(if ($Session.RunRoot) { Get-GuiOnlineReportPath $Session } else { '' })
+    return $Text.Replace('{ToolRoot}', $Session.ToolRoot).Replace('{RunRoot}', [string]$Session.RunRoot).Replace('{FindingsJson}', [string]$Session.FindingsJson).Replace('{PipeRc}', [string]$Session.PipeRc).Replace('{PersistWorkDir}', $persistDir).Replace('{ScanWorkDir}', $persistDir).Replace('{OnlineReport}', $onlineReport).Replace('{SharePDir}', $share.PDir).Replace('{ShareReport}', $share.Report)
 }
 
 function Resolve-GuiListToken {
@@ -292,7 +314,7 @@ function Resolve-GuiListToken {
         'PowerArg'   { $f = $Session.RunRoot + '/power-options-repair.json';  if (Test-Path -LiteralPath $f -PathType Leaf) { return @('-PowerOptionsRepair', $f) }; return @() }
         'PowerArgBs' { $f = $Session.RunRoot + '\power-options-repair.json'; if (Test-Path -LiteralPath $f -PathType Leaf) { return @('-PowerOptionsRepair', $f) }; return @() }
         'ScannerArgs' {
-            $f = $Session.RunRoot + '\scanner_results.json'
+            $f = (Get-GuiWorkDir $Session) + '\scanner_results.json'
             if (Test-Path -LiteralPath $f -PathType Leaf) { return @('-ScannerSummary', $f) }
             return @() # missing evidence is unknown, not proof that every scan was skipped
         }
@@ -314,7 +336,7 @@ function Resolve-GuiListToken {
         'GpoArgs' { if ([bool]$Session.Answers['ResetGpo']) { return @('-ResetLocalGpo') }; return @() }
         'ReportArg' {
             $f = (Get-GuiShareTargets -Session $Session).Report
-            if (Test-Path -LiteralPath $f -PathType Leaf) { return @('-ReportHtml', $f) }
+            if ($f -and (Test-Path -LiteralPath $f -PathType Leaf)) { return @('-ReportHtml', $f) }
             return @()
         }
         default { throw ('Unknown list token: ' + $Name) }
@@ -384,7 +406,7 @@ function Invoke-GuiBeforeHook {
     param($Session, [string]$Name)
     switch ($Name) {
         'EnsureLogsDir' {
-            $d = $Session.RunRoot + '\logs'
+            $d = (Get-GuiWorkDir $Session) + '\logs'
             if (-not (Test-Path -LiteralPath $d)) { $null = New-Item -ItemType Directory -Path $d -Force }
         }
         default { throw ('Unknown before-hook: ' + $Name) }
@@ -571,18 +593,18 @@ function Complete-GuiAction {
                 if ($ExitCode -eq 0 -and -not [bool]$Session.Answers['ShareReport']) { $text = 'Report package built on this PC; nothing was uploaded (sharing is unticked).' }
             }
             'MarkAfterScansReport' {
-                # Like the batch file: the exit code is not checked, only whether the file exists.
-                $f = $Session.RunRoot + '\report-after-scans.html'
-                if (Test-Path -LiteralPath $f -PathType Leaf) {
+                $f = Get-GuiOnlineReportPath $Session
+                $Session.AfterScansReportReady = ($ExitCode -eq 0 -and (Test-Path -LiteralPath $f -PathType Leaf))
+                if ($Session.AfterScansReportReady) {
                     $Session.ShareReport = $f
-                    $Session.SharePDir = $Session.RunRoot + '\after-scans\persistence'
+                    $Session.SharePDir = (Get-GuiWorkDir $Session) + '\persistence'
                     $status = 'Done'
-                    if ([bool]$Session.Answers['ShareReport']) { $text = 'Sharing report-after-scans.html. The offline report.html is kept unchanged.' }
-                    else { $text = 'Built report-after-scans.html (kept on this PC; sharing is unticked). The offline report.html is kept unchanged.' }
+                    $text = 'Built ' + (Split-Path -Leaf $f) + '. The Offline report is unchanged.'
+                    if (-not [bool]$Session.Answers['ShareReport']) { $text += ' Kept on this PC; sharing is unticked.' }
                 } else {
                     $status = 'Warn'
-                    if ([bool]$Session.Answers['ShareReport']) { $text = 'Could not build the after-scans report - sharing the offline report instead.' }
-                    else { $text = 'Could not build the after-scans report - the offline report is kept as it is.' }
+                    Set-GuiPipeRc $Session 1
+                    $text = 'Current Online report was not built; nothing will be shared. The Offline report is unchanged.'
                 }
             }
             default { throw ('Unknown after-hook: ' + $after) }
@@ -1051,12 +1073,12 @@ function Save-GuiSession {
     try {
         $doc = [ordered]@{
             Note = 'Display data written by the GUI. Nothing reads this file to decide whether a step may run.'
-            Mode = $Session.Mode; ComputerName = $Session.ComputerName; RunRoot = $Session.RunRoot
+            Mode = $Session.Mode; ComputerName = $Session.ComputerName; RunRoot = $Session.RunRoot; OnlineWorkDir = $Session.OnlineWorkDir
             FindingsJson = $Session.FindingsJson; FinalStatus = (Get-GuiFinalStatus $Session)
             Stopped = [bool]$Session.Stopped; StopMessage = $Session.StopMessage
             Steps = @($Session.Results | ForEach-Object { [ordered]@{ Step = $_.StepId; Title = $_.Title; Status = $_.Status; ExitCode = $_.ExitCode; Message = $_.Message; Utc = $_.Utc } })
         }
-        ($doc | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath (Join-Path $Session.RunRoot 'gui-session.json') -Encoding UTF8 -ErrorAction Stop
+        ($doc | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath (Join-Path (Get-GuiWorkDir $Session) 'gui-session.json') -Encoding UTF8 -ErrorAction Stop
         return $true
     } catch { return $false }
 }

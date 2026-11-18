@@ -59,9 +59,9 @@
     },
     {
       "Id": "6a", "Title": "Scanner: KVRT", "Group": "Scanners",
-      "Phases": ["ALL", "ONLINE"],
+      "Phases": ["ALL", "OFFLINE", "ONLINE"],
       "Calls": [
-        { "Script": "Invoke-GUIScanner.ps1", "Args": ["-Scanner", "KVRT", "-ResultPath", "{RunRoot}\\logs\\scanner-KVRT-result.json"], "Before": "EnsureLogsDir",
+        { "Script": "Invoke-GUIScanner.ps1", "Args": ["-Scanner", "KVRT", "-ResultPath", "{ScanWorkDir}\\logs\\scanner-KVRT-result.json"], "Before": "EnsureLogsDir",
           "Ask": "Scanners", "When": ["Answer:ScanKvrt"], "SkipText": "Skipped by the technician.",
           "Needs": ["Exists:{ToolRoot}tools\\AV\\KVRT.exe"], "NeedsText": "tools\\AV\\KVRT.exe not staged - run step 1 first.",
           "OnNonZero": "Warn", "Retry": true }
@@ -71,7 +71,7 @@
       "Id": "6b", "Title": "Scanner: ESET Online Scanner", "Group": "Scanners",
       "Phases": ["ALL", "ONLINE"],
       "Calls": [
-        { "Script": "Invoke-GUIScanner.ps1", "Args": ["-Scanner", "ESET", "-ResultPath", "{RunRoot}\\logs\\scanner-ESET-result.json"], "Before": "EnsureLogsDir",
+        { "Script": "Invoke-GUIScanner.ps1", "Args": ["-Scanner", "ESET", "-ResultPath", "{ScanWorkDir}\\logs\\scanner-ESET-result.json"], "Before": "EnsureLogsDir",
           "Ask": "Scanners", "When": ["Answer:ScanEset"], "SkipText": "Skipped by the technician.",
           "Needs": ["Exists:{ToolRoot}tools\\AV\\esetonlinescanner.exe"], "NeedsText": "tools\\AV\\esetonlinescanner.exe not staged - run step 1 first.",
           "OnNonZero": "Warn", "Retry": true }
@@ -81,7 +81,7 @@
       "Id": "6c", "Title": "Scanner: Malwarebytes", "Group": "Scanners",
       "Phases": ["ALL", "ONLINE"],
       "Calls": [
-        { "Script": "Invoke-GUIScanner.ps1", "Args": ["-Scanner", "Malwarebytes", "-ResultPath", "{RunRoot}\\logs\\scanner-Malwarebytes-result.json"],
+        { "Script": "Invoke-GUIScanner.ps1", "Args": ["-Scanner", "Malwarebytes", "-ResultPath", "{ScanWorkDir}\\logs\\scanner-Malwarebytes-result.json"],
           "Ask": "Scanners", "When": ["Answer:ScanMalwarebytes"], "SkipText": "Skipped by the technician.",
           "Before": "EnsureLogsDir", "OnNonZero": "Warn", "Retry": true, "Prompts": ["MbInstallDone", "MbScanDone"] }
       ]
@@ -89,7 +89,7 @@
     {
       "Id": "6d", "Title": "Persistence inventory and review", "Group": "Persistence",
       "Phases": ["ALL", "OFFLINE", "ONLINE"],
-      "Note": "Online half: the check runs again AFTER the scanners into {RunRoot}\\after-scans; the offline results are never overwritten.",
+      "Note": "Online: the check runs AFTER scanners in this attempt's fresh folder; earlier evidence is never overwritten.",
       "Calls": [
         { "Script": "Invoke-PersistenceScan.ps1", "Args": ["-WorkDir", "{PersistWorkDir}", "-PreflightRoot", "{RunRoot}", "{@PersistArgs}"],
           "OnNonZero": "WarnPipe", "NonZeroText": "Persistence scan/review incomplete - evidence will still be reported.",
@@ -184,17 +184,17 @@
       "Id": "9r", "Title": "Rebuild the report with the after-scans persistence check", "Group": "Report",
       "Phases": ["ONLINE"],
       "Calls": [
-        { "Script": "Write-ScannerSummary.ps1", "Args": ["-WorkDir", "{RunRoot}", "{@ScannerStateArgs}"], "When": ["Not:ScannerOnly", "Has:FindingsJson"], "OnNonZero": "Warn" },
+        { "Script": "Write-ScannerSummary.ps1", "Args": ["-WorkDir", "{ScanWorkDir}", "{@ScannerStateArgs}"], "When": ["Not:ScannerOnly", "Has:FindingsJson"], "OnNonZero": "Warn" },
         { "Script": "New-InvestigationReport.ps1",
           "Args": ["-FindingsJson", "{FindingsJson}", "{@AfterScansReportArgs}",
-                   "-PersistenceInventory", "{RunRoot}\\after-scans\\persistence\\inventory.json",
-                   "-PersistenceRemoval", "{RunRoot}\\after-scans\\persistence\\removal.json",
-                   "-PersistenceResult", "{RunRoot}\\after-scans\\persistence\\result.json",
+                   "-PersistenceInventory", "{PersistWorkDir}\\persistence\\inventory.json",
+                   "-PersistenceRemoval", "{PersistWorkDir}\\persistence\\removal.json",
+                   "-PersistenceResult", "{PersistWorkDir}\\persistence\\result.json",
                    "{@PowerArgBs}", "{@ScannerArgs}",
-                   "-OutputPath", "{RunRoot}\\report-after-scans.html"],
-          "When": ["Not:ScannerOnly", "Has:FindingsJson", "Exists:{RunRoot}\\after-scans\\persistence\\result.json"],
-          "SkipText": "No after-scans persistence result: the offline report is shared as it is.",
-          "OnNonZero": "Ignore", "After": "MarkAfterScansReport" }
+                   "-OutputPath", "{OnlineReport}"],
+          "When": ["Not:ScannerOnly", "Has:FindingsJson"],
+          "SkipText": "No Offline findings for a combined report; nothing will be shared.",
+          "OnMissing": "WarnPipeSkip", "OnNonZero": "WarnPipe", "After": "MarkAfterScansReport" }
       ]
     },
     {
@@ -206,8 +206,8 @@
                    "-PersistenceInventory", "{SharePDir}\\inventory.json",
                    "-PersistenceRemoval", "{SharePDir}\\removal.json",
                    "-PersistenceResult", "{SharePDir}\\result.json", "{@ShareArgs}"],
-          "When": ["Not:ScannerOnly", "Has:FindingsJson"],
-          "SkipText": "Nothing to share: scanner-only run, or the offline-half run has no findings.json.",
+          "When": ["Not:ScannerOnly", "Has:FindingsJson", "Flag:AfterScansReportReady", "Exists:{ShareReport}"],
+          "SkipText": "No current Online report was built, or this is a separate scanner run. Nothing was shared.",
           "OnMissing": "WarnPipeSkip", "MissingMessage": "Submit-ConnectWiseReport.ps1 missing - the report was not shared.",
           "OnNonZero": "WarnPipe", "Retry": true, "NonZeroText": "Report share failed - the local report and evidence remain on this PC.",
           "After": "MarkShared" }

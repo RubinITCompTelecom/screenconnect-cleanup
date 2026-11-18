@@ -10,7 +10,7 @@ name: windows-ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, gui-alpha]
   pull_request:
   workflow_dispatch:
 
@@ -392,9 +392,21 @@ jobs:
         shell: powershell
         run: ./tests/gui/Test-GuiAsk.ps1
 
+      - name: GUI - Online continuation choices (no engines)
+        shell: powershell
+        run: ./tests/gui/Test-GuiOnlineContinuation.ps1
+
+      - name: GUI - repeated Online attempts and report failure (no scans or removal)
+        shell: powershell
+        run: ./tests/gui/Test-GuiOnlineReruns.ps1
+
       - name: GUI - tool scan pause and stop controls (harmless child fixtures)
         shell: powershell
         run: ./tests/gui/Test-GuiScanControls.ps1
+
+      - name: GUI - persistence candidate checkboxes (no removal)
+        shell: powershell
+        run: ./tests/gui/Test-GuiPersistenceSelection.ps1
 
       - name: GUI - package layout (top launcher in folders with parentheses)
         shell: powershell

@@ -3,6 +3,31 @@
 Semantic versions. The deploy zip is named `screenconnect-cleanup-v<VER>.zip`
 and carries a `VERSION` file so each build is self-identifying.
 
+## [1.8.13-beta.1] - 2026-11-17 - Latest beta release
+- Promotes the GUI Alpha 10 code, whose hosted Windows CI passed, to the Latest beta download. Runtime code is unchanged by this version promotion.
+- Includes persistence candidate checkboxes, staged Offline KVRT (ESET and Malwarebytes installation remain Online-only), explicit Online continuation/cancellation choices, fresh Online attempt folders and current-report sharing guards.
+- Earlier releases remain available. Live elevated Windows acceptance remains outstanding.
+
+## [1.8.12-gui-alpha.10] - 2026-11-17 - Preserve repeated Online attempts and current report evidence (ALPHA)
+- Each Online run reserves a fresh locked attempt folder: `after-scans`, then `after-scans-2`, and so on. Scanner results/summaries, persistence evidence and GUI logs/session state are kept per attempt, preserving Offline results and interrupted Online evidence.
+- Online reports have matching unique names. Report generation includes current missing/incomplete persistence evidence instead of silently sharing the Offline report. A failed report build prevents sharing, even if a partial file exists.
+- The GUI persistence summary, Open report button and Desktop refresh refer to the current Online attempt. Skipping every antivirus scan is explicitly logged.
+- Batch and GUI launchers use the same directory reservation and sharing rules. Persistence overwrite protection remains enabled.
+
+## [1.8.12-gui-alpha.9] - 2026-11-17 - Explain Online continuation choices (ALPHA)
+- The Online continuation dialog explains using the completed Offline evidence versus starting separate scans, including report/sharing behavior and optional KVRT reruns. Neither choice repeats ScreenConnect detection or removal.
+- Cancel and closing the continuation dialog start nothing; closing previously continued the Offline run automatically.
+- Earlier run folders are correctly described as view-only in that list, with completed Offline runs available to continue through Online.
+
+## [1.8.12-gui-alpha.8] - 2026-11-17 - Keep internet-dependent scanners in Online mode (ALPHA)
+- Offline offers staged KVRT only. ESET is skipped even when its executable is staged, because it needs internet. Malwarebytes installation remains Online-only.
+- GUI and batch launchers agree on the Offline scanner selection; Online still offers all three scanners.
+
+## [1.8.12-gui-alpha.7] - 2026-11-17 - Offline staged scanners and persistence selection (ALPHA)
+- Persistence cleanup uses unchecked candidate checkboxes with complete target, command and reason details; the final typed confirmation shows all selected entries.
+- Offline mode offers already-staged KVRT and ESET after ScreenConnect removal in both the GUI and batch launcher. Missing scanners are skipped; staging, Malwarebytes installation and upload remain outside Offline mode.
+- Other remote-access products use a shorter heading in the findings panel.
+
 ## [1.8.12-gui-alpha.6] - 2026-11-16 - Reviewed cleanup and GUI integration (ALPHA)
 **ALPHA prerelease.** Combines the reviewed cleanup repairs with the GUI Online cleanup-first fix.
 Existing releases, their assets/tags and the Latest selection are preserved. Live elevated VM acceptance

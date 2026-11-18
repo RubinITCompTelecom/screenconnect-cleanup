@@ -167,4 +167,29 @@ function New-SccProtectedRunRoot {
     return $path
 }
 
-Export-ModuleMember -Function New-SccProtectedRunRoot, Test-SccRunRootTrusted
+function New-SccOnlineAttempt {
+    # Reserve a fresh, locked directory. Never reuse an interrupted or completed attempt.
+    param([Parameter(Mandatory = $true)][string]$RunRoot)
+    $reason = ''
+    if (-not (Test-SccRunRootTrusted -RunRoot $RunRoot -Reason ([ref]$reason))) {
+        throw ('Online run folder is not locked: ' + $reason)
+    }
+    for ($number = 1; $number -le 10000; $number++) {
+        $leaf = 'after-scans' + $(if ($number -gt 1) { '-' + $number } else { '' })
+        $path = Join-Path $RunRoot $leaf
+        if ((Test-Path -LiteralPath $path) -or (Test-Path -LiteralPath (Join-Path $RunRoot ('report-' + $leaf + '.html')))) { continue }
+        $null = New-SccSecuredDirectory -Path $path
+        if (-not (Test-SccRunRootTrusted -RunRoot $path -Reason ([ref]$reason))) { throw ('Online attempt is not locked: ' + $reason) }
+        try {
+            $reservation = New-Object IO.FileStream((Join-Path $path 'online-attempt.lock'), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        } catch [IO.IOException] {
+            if (Test-Path -LiteralPath (Join-Path $path 'online-attempt.lock')) { continue }
+            throw
+        }
+        $reservation.Dispose()
+        return $path
+    }
+    throw 'Could not reserve a fresh Online attempt directory.'
+}
+
+Export-ModuleMember -Function New-SccProtectedRunRoot, Test-SccRunRootTrusted, New-SccOnlineAttempt

@@ -383,13 +383,25 @@ function New-DialogWindow {
         [void]$sp.Children.Add($d)
     }
     $tag = @{ Checks = @{}; Text = $null; Word = $TypeWord; Gated = @() }
+    $checkHost = $sp
+    if (@($Checks).Count -gt 0) {
+        $checkHost = New-Object System.Windows.Controls.StackPanel
+        $scroll = New-Object System.Windows.Controls.ScrollViewer
+        $scroll.MaxHeight = 260; $scroll.MaxWidth = 610
+        $scroll.VerticalScrollBarVisibility = 'Auto'; $scroll.HorizontalScrollBarVisibility = 'Disabled'
+        $scroll.Content = $checkHost
+        [void]$sp.Children.Add($scroll)
+    }
     foreach ($c in @($Checks)) {
         $cb = New-Object System.Windows.Controls.CheckBox
-        $cb.Content = $c.Text; $cb.IsChecked = [bool]$c.Checked; $cb.IsEnabled = $(if ($c.PSObject.Properties['Enabled']) { [bool]$c.Enabled } else { $true })
+        $label = New-Object System.Windows.Controls.TextBlock
+        $label.Text = $c.Text; $label.TextWrapping = 'Wrap'
+        $cb.Content = $label; $cb.HorizontalContentAlignment = 'Stretch'
+        $cb.IsChecked = [bool]$c.Checked; $cb.IsEnabled = $(if ($c.PSObject.Properties['Enabled']) { [bool]$c.Enabled } else { $true })
         $cb.Margin = New-Object System.Windows.Thickness(0, 10, 0, 0); $cb.Foreground = Get-Brush 'Foreground'
         if ($c.PSObject.Properties['DependsOn'] -and $c.DependsOn) { $cb.Tag = [string]$c.DependsOn }
         $tag.Checks[[string]$c.Key] = $cb
-        [void]$sp.Children.Add($cb)
+        [void]$checkHost.Children.Add($cb)
     }
     foreach ($cb in @($tag.Checks.Values)) {
         if ($cb.Tag) {
@@ -478,6 +490,23 @@ function Get-RecentConsole {
     return (($lines[($lines.Count - $take)..($lines.Count - 1)]) -join "`r`n")
 }
 
+function Get-PersistenceCandidateChecks {
+    # Translate only the current child's complete printed list. Never infer engine eligibility.
+    param([string]$OutputText)
+    $start = [regex]::Match($OutputText, '(?m)^\[1\] (?:ScheduledTask|RunKey|StartupFile)\r?$')
+    if (-not $start.Success) { return }
+    $list = $OutputText.Substring($start.Index).TrimEnd()
+    $pattern = '(?m)^\[(?<Index>[1-9][0-9]*)\] (?:ScheduledTask|RunKey|StartupFile)\r?\n    Target: [^\r\n]+\r?\n    Command: [^\r\n]+\r?\n    Reason: [^\r\n]+'
+    $rows = [regex]::Matches($list, $pattern)
+    if ([regex]::Replace($list, $pattern, '').Trim().Length -ne 0) { return }
+    $checks = @()
+    foreach ($match in $rows) {
+        if ([int]$match.Groups['Index'].Value -ne ($checks.Count + 1)) { return }
+        $checks += [pscustomobject]@{ Key = $match.Groups['Index'].Value; Text = $match.Value; Checked = $false }
+    }
+    return $checks
+}
+
 function Get-RemovalPlanText {
     # The exact instances the confirmation covers: what the findings say, minus what the technician marked KEEP.
     $view = Get-GuiFindingsView -Path $script:Session.FindingsJson
@@ -536,15 +565,25 @@ function Resolve-Prompt {
             if ($r) { $send = $r.Value }
         }
         'PersistIndices' {
-            $r = Show-Dialog -Id 'PersistIndices' -Title 'Persistence cleanup - choose candidates' -TextInput `
-                -Message 'The persistence review found the candidates listed below (heuristic matches, not malware verdicts). Type the numbers of the ones to remove, separated by commas, or choose Remove nothing.' `
-                -Detail (Get-RecentConsole 30) -Buttons @(@{ Text = 'Continue'; Value = 'send' }, @{ Text = 'Remove nothing'; Value = 'skip' })
-            if ($r -and $r.Value -eq 'send') { $send = $r.Text }
+            $script:PersistenceSelectionText = ''
+            $checks = @(Get-PersistenceCandidateChecks -OutputText $script:PersistenceOutput)
+            if ($checks.Count -eq 0) {
+                Add-ConsoleNote 'Could not read the complete persistence candidate list. Removing nothing.'
+                break
+            }
+            $r = Show-Dialog -Id 'PersistIndices' -Title 'Persistence cleanup - choose candidates' -Checks $checks `
+                -Message 'Tick the entries to remove. Leave entries unticked to keep them. These are heuristic matches, not malware verdicts. Continue reviews your selection before removal.' `
+                -Buttons @(@{ Text = 'Continue'; Value = 'send' }, @{ Text = 'Remove nothing'; Value = 'skip' })
+            if ($r -and $r.Value -eq 'send') {
+                $selected = @($checks | Where-Object { $r.Checks[$_.Key] })
+                $send = (@($selected | ForEach-Object { $_.Key }) -join ',')
+                $script:PersistenceSelectionText = (@($selected | ForEach-Object { $_.Text }) -join "`r`n`r`n")
+            }
         }
         'PersistRemove' {
             $r = Show-Dialog -Id 'PersistRemove' -Title 'Confirm persistence cleanup' -TypeWord 'REMOVE' `
                 -Message ('These exact persistence entries will be backed up and removed. Type REMOVE to confirm.') `
-                -Detail (Get-RecentConsole 20) -Buttons @(@{ Text = 'Remove'; Value = 'ok'; NeedsWord = $true }, @{ Text = 'Do not remove'; Value = 'cancel' })
+                -Detail $script:PersistenceSelectionText -Buttons @(@{ Text = 'Remove'; Value = 'ok'; NeedsWord = $true }, @{ Text = 'Do not remove'; Value = 'cancel' })
             if ($r -and $r.Value -eq 'ok') { $send = $r.Text; $script:CloseLock = $true }
         }
         default {
@@ -662,7 +701,7 @@ function Show-Findings {
     }
     if (@($view.OtherTargets).Count -gt 0) {
         $oh = New-Object System.Windows.Controls.TextBlock
-        $oh.Text = 'Other remote-access products (reported only - this tool never removes these)'; $oh.FontWeight = 'SemiBold'; $oh.Margin = New-Object System.Windows.Thickness(0, 6, 0, 4)
+        $oh.Text = 'Other remote-access products'; $oh.FontWeight = 'SemiBold'; $oh.Margin = New-Object System.Windows.Thickness(0, 6, 0, 4)
         [void]$ui.CardsHost.Children.Add($oh)
         foreach ($o in $view.OtherTargets) {
             $t = New-Object System.Windows.Controls.TextBlock
@@ -700,7 +739,7 @@ function Update-HeaderButtons {
     $ui.BtnOpenRun.IsEnabled = [bool]$has
     $ui.BtnOpenLog.IsEnabled = [bool]($script:LogPath -and (Test-Path -LiteralPath $script:LogPath))
     $rep = $false
-    if ($has) { $rep = (Get-GuiReportInfo -RunRoot $script:Session.RunRoot).ReportExists }
+    if ($has) { $rep = Test-Path -LiteralPath (Expand-GuiTokens -Session $script:Session -Text '{ShareReport}') -PathType Leaf }
     $ui.BtnOpenReport.IsEnabled = [bool]$rep
 }
 
@@ -734,13 +773,18 @@ function Resolve-Ask {
         'Scanners' {
             $avDir = Join-Path $sess.ToolRoot 'tools\AV'
             $kv = Test-Path -LiteralPath (Join-Path $avDir 'KVRT.exe'); $es = Test-Path -LiteralPath (Join-Path $avDir 'esetonlinescanner.exe')
-            $r = Show-Dialog -Id 'Scanners' -Title 'Antivirus scans' -Message 'Each scanner opens in its own window. Complete it, then return here. Choose the scans to run.' -Checks @(
+            $offline = $sess.Phase -eq 'OFFLINE'
+            if ($offline) { $es = $false }
+            $scanMessage = 'Each scanner opens in its own window. Complete it, then return here. Choose the scans to run.'
+            if ($offline) { $scanMessage = 'Run KVRT if it is already staged in this folder. Missing KVRT is skipped; nothing is downloaded. ESET and Malwarebytes run in Online mode. Complete the scan, then return here.' }
+            $r = Show-Dialog -Id 'Scanners' -Title 'Antivirus scans' -Message $scanMessage -Checks @(
                 [pscustomobject]@{ Key = 'ScanKvrt'; Text = 'KVRT' + $(if ($kv) { '' } else { '  (not staged - run the Online or Stage step first)' }); Checked = $kv; Enabled = $kv },
-                [pscustomobject]@{ Key = 'ScanEset'; Text = 'ESET Online Scanner' + $(if ($es) { '' } else { '  (not staged - run the Online or Stage step first)' }); Checked = $es; Enabled = $es },
-                [pscustomobject]@{ Key = 'ScanMalwarebytes'; Text = 'Malwarebytes (installed through winget, then the official offline installer)'; Checked = $true; Enabled = $true }) `
+                [pscustomobject]@{ Key = 'ScanEset'; Text = $(if ($offline) { 'ESET Online Scanner (Online mode only)' } else { 'ESET Online Scanner' + $(if ($es) { '' } else { '  (not staged - run the Online or Stage step first)' }) }); Checked = $es; Enabled = $es },
+                [pscustomobject]@{ Key = 'ScanMalwarebytes'; Text = $(if ($offline) { 'Malwarebytes (installation available in Online mode)' } else { 'Malwarebytes (installed through winget, then the official offline installer)' }); Checked = (-not $offline); Enabled = (-not $offline) }) `
                 -Buttons @(@{ Text = 'Start the selected scans'; Value = 'go' }, @{ Text = 'Skip all scans'; Value = 'skip' })
             $vals = @{ ScanKvrt = $false; ScanEset = $false; ScanMalwarebytes = $false }
             if ($r -and $r.Value -eq 'go') { foreach ($k in @($vals.Keys)) { $vals[$k] = [bool]$r.Checks[$k] } }
+            if (-not ($vals.ScanKvrt -or $vals.ScanEset -or $vals.ScanMalwarebytes)) { Add-ConsoleNote 'No antivirus scans selected. Continuing to persistence review and the remaining steps.' }
             Set-GuiAnswer -Session $sess -Ask 'Scanners' -Values $vals
             return $true
         }
@@ -811,9 +855,18 @@ function Start-Run {
     if ($ModeName -eq 'Online') {
         $prior = Find-GuiPriorRun -Session $sess
         if ($prior) {
-            $r = Show-Dialog -Id 'ContinuePrior' -Title 'Continue the offline run?' -Message ('A finished offline-half run was found for this PC:' + "`r`n" + $prior.RunRoot + "`r`n`r`nContinue that run? " + $(if ($share) { 'Its report is shared at the end.' } else { 'Its report is updated on this PC but not shared (the share box is unticked).' }) + " Otherwise a scanner-only run starts and nothing is shared.") -Buttons @(
-                @{ Text = 'Continue that run'; Value = 'continue' }, @{ Text = 'Start a scanner-only run'; Value = 'new' })
-            if ($r -and $r.Value -eq 'new') { $prior = $null }
+            $r = Show-Dialog -Id 'ContinuePrior' -Title 'How should Online use the Offline results?' `
+                -Message ('Continue Offline run: keep its evidence and folder, run selected scanners, check persistence again, and offer antivirus uninstall. Update the combined report. ' + $(if ($share) { 'The updated report is shared at the end.' } else { 'The updated report stays local because sharing is unticked.' }) + "`r`n`r`n" +
+                    'Start separate scans: use a new folder for scanners, persistence and optional antivirus uninstall. Leave Offline results unchanged. No combined report or upload.' + "`r`n`r`n" +
+                    'Neither repeats ScreenConnect detection or removal. You choose the scans; KVRT can run again. Online may download tools. Cancel or close to start nothing.') `
+                -Detail ('Completed Offline run: ' + $prior.RunRoot) -Buttons @(
+                @{ Text = 'Continue Offline run'; Value = 'continue' }, @{ Text = 'Start separate scans'; Value = 'new' }, @{ Text = 'Cancel'; Value = 'cancel' })
+            if (-not $r -or $r.Value -notin @('continue', 'new')) {
+                Add-ConsoleNote 'No run started: the Online continuation choice was cancelled.'
+                if ($script:AutoStart) { $win.Close() }
+                return
+            }
+            if ($r.Value -eq 'new') { $prior = $null }
         } else {
             # No finished offline-half run on this PC (staging the tools does not make one). The Online
             # half has no removal step, so starting it here used to go straight to the scanners and the
@@ -842,7 +895,7 @@ function Start-Run {
     Initialize-Stepper $sess.Plan $ModeName
     $script:LogPath = ''
     if ($run) {
-        $logs = Join-Path $run 'logs'
+        $logs = Join-Path (Expand-GuiTokens -Session $sess -Text '{ScanWorkDir}') 'logs'
         if (-not (Test-Path -LiteralPath $logs)) { $null = New-Item -ItemType Directory -Path $logs -Force }
         $script:LogPath = Join-Path $logs 'gui-console.log'
     }
@@ -858,6 +911,7 @@ function Start-Run {
     $ui.RunText.Text = $(if ($run) { 'Run folder: ' + $run } else { 'Run folder: none (this mode creates none)' })
     Show-Panel 'Run'
     Add-ConsoleNote ($label + $(if ($run) { '. Run folder: ' + $run } else { '' }))
+    if ($sess.OnlineWorkDir) { Add-ConsoleNote ('This Online attempt: ' + $sess.OnlineWorkDir) }
     if ($sess.ScannerOnly) { Add-ConsoleNote 'No offline-half run is being continued: this is a scanner-only run. There is no report to share from it.' }
     Save-Session
     Update-Stepper
@@ -957,6 +1011,7 @@ function Move-Next {
         $script:CloseLock = [bool]$a.Destructive
         Add-ConsoleLines @('', ('=== Step ' + $a.StepId + ': ' + $a.Title + ' ==='), ('> ' + [IO.Path]::GetFileName($a.ScriptPath) + ' ' + (ConvertTo-GuiArgString $a.Args)))
         try {
+            $script:PersistenceOutput = ''; $script:PersistenceSelectionText = ''
             $script:Child = Start-GuiChild -ScriptPath $a.ScriptPath -ArgumentList $a.Args -WorkingDirectory $script:Session.ToolRoot
         } catch {
             Add-ConsoleNote ('Could not start ' + $a.ScriptPath + ': ' + $_.Exception.Message)
@@ -1050,8 +1105,7 @@ function Show-RunSummary {
     [void]$ui.CardsHost.Children.Add($head)
 
     if ($planIds -contains '6d' -and $Sess.RunRoot) {
-        $sub = $(if ($Sess.Phase -eq 'ONLINE') { 'after-scans\persistence' } else { 'persistence' })
-        $pv = Get-GuiPersistenceView -RunRoot $Sess.RunRoot -SubDir $sub
+        $pv = Get-GuiPersistenceView -RunRoot (Expand-GuiTokens -Session $Sess -Text '{PersistWorkDir}')
         if (-not $pv.Available) { Add-SummaryLine 'Persistence check' ('not available (' + $pv.Error + ')') 'WarningFg' }
         else {
             $st = $pv.Status + $(if ($pv.RunStatus -and $pv.RunStatus -ne $pv.Status) { ', review ' + $pv.RunStatus } else { '' })
@@ -1161,6 +1215,9 @@ function Invoke-Tick {
     if ($script:InDialog -or -not $script:Child) { return }
     $u = Update-GuiChild -Child $script:Child
     if (@($u.Lines).Count -gt 0) {
+        if ($script:Action -and $script:Action.Call.PSObject.Properties['Prompts'] -and @($script:Action.Call.Prompts) -contains 'PersistIndices') {
+            $script:PersistenceOutput += (@($u.Lines) -join "`n") + "`n"
+        }
         Add-ConsoleLines $u.Lines
         if ($script:Action -and ($script:Action.StepId -eq '9b' -or $script:Action.StepId -eq '9o')) {
             $url = Get-GuiShareUrl $u.Lines
@@ -1180,6 +1237,7 @@ function Invoke-Tick {
             if ($r -and $r.Value -eq 'retry') {
                 Add-ConsoleNote ('Running step ' + $a.StepId + ' again at the technician''s request.')
                 Add-ConsoleLines @('', ('=== Step ' + $a.StepId + ': ' + $a.Title + ' (again) ==='))
+                $script:PersistenceOutput = ''; $script:PersistenceSelectionText = ''
                 $script:Child = Start-GuiChild -ScriptPath $a.ScriptPath -ArgumentList $a.Args -WorkingDirectory $script:Session.ToolRoot
                 $script:CloseLock = [bool]$a.Destructive
                 return
@@ -1280,7 +1338,7 @@ Update-HeaderButtons
 try {
     $prior = @(Get-ChildItem -LiteralPath $RitRoot -Directory -ErrorAction Stop | Where-Object { $_.Name -like ($env:COMPUTERNAME + '-*') } | Sort-Object LastWriteTime -Descending | Select-Object -First 3)
     if ($prior.Count -gt 0) {
-        $ui.PriorRunsText.Text = "Earlier runs on this PC (view only, they are never resumed):`r`n" + (($prior | ForEach-Object { '  ' + $_.FullName + '   ' + $_.LastWriteTime.ToString('yyyy-MM-dd HH:mm') }) -join "`r`n")
+        $ui.PriorRunsText.Text = "Earlier runs on this PC (view only here; Online can continue a completed Offline run):`r`n" + (($prior | ForEach-Object { '  ' + $_.FullName + '   ' + $_.LastWriteTime.ToString('yyyy-MM-dd HH:mm') }) -join "`r`n")
     }
 } catch { }
 
@@ -1298,7 +1356,7 @@ $ui.BtnRestart.add_Click({
     })
 $ui.BtnOpenRitRoot.add_Click({ if (Test-Path -LiteralPath $RitRoot -PathType Container) { Start-Process -FilePath 'explorer.exe' -ArgumentList ('"' + $RitRoot + '"') } })
 $ui.BtnOpenRun.add_Click({ if ($script:Session -and $script:Session.RunRoot) { Start-Process -FilePath 'explorer.exe' -ArgumentList ('"' + $script:Session.RunRoot + '"') } })
-$ui.BtnOpenReport.add_Click({ if ($script:Session) { $r = (Get-GuiReportInfo -RunRoot $script:Session.RunRoot); if ($r.ReportExists) { Start-Process -FilePath $r.ReportPath } } })
+$ui.BtnOpenReport.add_Click({ if ($script:Session) { $path = Expand-GuiTokens -Session $script:Session -Text '{ShareReport}'; if (Test-Path -LiteralPath $path -PathType Leaf) { Start-Process -FilePath $path } } })
 $ui.BtnOpenLog.add_Click({ if ($script:LogPath -and (Test-Path -LiteralPath $script:LogPath)) { Start-Process -FilePath 'notepad.exe' -ArgumentList ('"' + $script:LogPath + '"') } })
 $ui.BtnCopy.add_Click({ try { [System.Windows.Clipboard]::SetText($ui.ConsoleBox.Text) } catch { } })
 

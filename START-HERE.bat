@@ -12,7 +12,7 @@ rem  SPLIT (offline / online halves). With no flag this is the full pipeline,
 rem  unchanged. Technicians start one of the two launchers, which pass one flag:
 rem    --offline  START-HERE-OFFLINE.bat  cleanup that needs NO internet: preflight,
 rem               snapshots, detection, removal, persistence review, diff, local
-rem               report. No downloads, no scanners, no upload. Shown as steps 1-7.
+rem               report, plus staged KVRT. No staging or upload. Steps 1-7.
 rem               When ScreenConnect is found it asks whether any should be KEPT.
 rem               Its run folder is created LOCKED to administrators, because the
 rem               online half continues it later (tools\RunRootSecurity.psm1).
@@ -82,7 +82,6 @@ set "SCC_SUBMIT_ARGS="
 set "SCC_SCANNER_ONLY=0"
 if /i "!SCC_PHASE!"=="OFFLINE" (
     set "SCC_DO_STAGE=0"
-    set "SCC_DO_SCAN=0"
     set "SCC_DO_AVU=0"
     set "SCC_DO_SHARE=0"
     set "SCC_SUBMIT_ARGS=-NoUpload"
@@ -175,6 +174,15 @@ if not defined SCC_RUN_ROOT (
 )
 
 :run_root_ready
+set "SCC_SCAN_ROOT=!SCC_RUN_ROOT!"
+if /i "!SCC_PHASE!"=="ONLINE" (
+    set "SCC_SCAN_ROOT="
+    for /f "delims=" %%R in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "Import-Module (Join-Path $env:SCC_DP0 'tools\RunRootSecurity.psm1'); New-SccOnlineAttempt -RunRoot $env:SCC_RUN_ROOT"') do set "SCC_SCAN_ROOT=%%R"
+    if not defined SCC_SCAN_ROOT goto :run_setup_failed
+    for %%A in ("!SCC_SCAN_ROOT!") do set "SCC_ONLINE_REPORT=!SCC_RUN_ROOT!\report-%%~nxA.html"
+    echo     This Online attempt: !SCC_SCAN_ROOT!
+)
+if not exist "!SCC_SCAN_ROOT!\logs" mkdir "!SCC_SCAN_ROOT!\logs"
 echo     Run: !SCC_RUN_ROOT!
 set "PIPE_RC=0"
 set "POWER_REPAIR_RAN=0"
@@ -196,6 +204,7 @@ echo   Runs by itself except Step 4, which asks ONE typed
 echo   confirmation before removal. Ctrl+C aborts.
 echo.
 echo   1 preflight  2 before snapshot  3 detect  4 remove
+echo   Optional: run KVRT already staged in tools\AV.
 echo   5 persistence  6 after snapshot + diff  7 report
 echo.
 echo   Nothing is downloaded or uploaded. Afterwards, once the PC is
@@ -308,22 +317,24 @@ if exist "!SCC_DP0!Invoke-ReviewAndRemove.ps1" (
 
 :after_pre
 
-rem ---- Step 6: antivirus scans (internet) - online half only ---------------------
+rem ---- Step 6: attended antivirus scans; offline uses staged KVRT only ----------
 if "!SCC_DO_SCAN!"=="0" goto :scanners_skipped_phase
 echo.
 if /i "!SCC_PHASE!"=="ONLINE" echo  STEP 2/5: Antivirus scans (attended)
-if /i not "!SCC_PHASE!"=="ONLINE" echo  STEP 6/9: Antivirus scans (attended)
+if /i "!SCC_PHASE!"=="OFFLINE" echo  Optional staged KVRT (attended, no downloads)
+if /i not "!SCC_PHASE!"=="ONLINE" if /i not "!SCC_PHASE!"=="OFFLINE" echo  STEP 6/9: Antivirus scans (attended)
 echo    Each scanner opens visibly. Complete it, then return here.
 
 echo.
 if /i "!SCC_PHASE!"=="ONLINE" echo    -- 2a: KVRT --
-if /i not "!SCC_PHASE!"=="ONLINE" echo    -- 6a: KVRT --
+if /i "!SCC_PHASE!"=="OFFLINE" echo    -- 4a: Staged KVRT --
+if /i not "!SCC_PHASE!"=="ONLINE" if /i not "!SCC_PHASE!"=="OFFLINE" echo    -- 6a: KVRT --
 set /p GO="    Launch KVRT? [Y/n] "
 set "SCC_KVRT_STATE=Skipped"
 if /i not "%GO%"=="n" (
     if exist "!SCC_DP0!tools\AV\KVRT.exe" (
         if not exist "!SCC_RUN_ROOT!\logs" mkdir "!SCC_RUN_ROOT!\logs"
-        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Invoke-GUIScanner.ps1" -Scanner KVRT -ResultPath "!SCC_RUN_ROOT!\logs\scanner-KVRT-result.json"
+        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Invoke-GUIScanner.ps1" -Scanner KVRT -ResultPath "!SCC_SCAN_ROOT!\logs\scanner-KVRT-result.json"
         set "SCC_KVRT_STATE=Exit:!errorlevel!"
         if errorlevel 1 echo        [WARN] KVRT launch failed with errorlevel !errorlevel! - see the message above
     ) else (
@@ -333,15 +344,18 @@ if /i not "%GO%"=="n" (
 )
 set GO=
 
+rem ESET requires internet; Malwarebytes installation also belongs to Online.
+if /i "!SCC_PHASE!"=="OFFLINE" goto :after_scanners
+
 echo.
 if /i "!SCC_PHASE!"=="ONLINE" echo    -- 2b: ESET Online Scanner --
-if /i not "!SCC_PHASE!"=="ONLINE" echo    -- 6b: ESET Online Scanner --
+if /i not "!SCC_PHASE!"=="ONLINE" if /i not "!SCC_PHASE!"=="OFFLINE" echo    -- 6b: ESET Online Scanner --
 set /p GO="    Launch ESET Online Scanner? [Y/n] "
 set "SCC_ESET_STATE=Skipped"
 if /i not "%GO%"=="n" (
     if exist "!SCC_DP0!tools\AV\esetonlinescanner.exe" (
         if not exist "!SCC_RUN_ROOT!\logs" mkdir "!SCC_RUN_ROOT!\logs"
-        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Invoke-GUIScanner.ps1" -Scanner ESET -ResultPath "!SCC_RUN_ROOT!\logs\scanner-ESET-result.json"
+        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Invoke-GUIScanner.ps1" -Scanner ESET -ResultPath "!SCC_SCAN_ROOT!\logs\scanner-ESET-result.json"
         set "SCC_ESET_STATE=Exit:!errorlevel!"
         if errorlevel 1 echo        [WARN] ESET launch failed with errorlevel !errorlevel! - see the message above
     ) else (
@@ -359,7 +373,7 @@ set /p GO="    Install and launch Malwarebytes now? [Y/n] "
 set "SCC_MB_STATE=Skipped"
 if /i "%GO%"=="n" goto :skip_6c
 if not exist "!SCC_RUN_ROOT!\logs" mkdir "!SCC_RUN_ROOT!\logs"
-powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Invoke-GUIScanner.ps1" -Scanner Malwarebytes -ResultPath "!SCC_RUN_ROOT!\logs\scanner-Malwarebytes-result.json"
+powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Invoke-GUIScanner.ps1" -Scanner Malwarebytes -ResultPath "!SCC_SCAN_ROOT!\logs\scanner-Malwarebytes-result.json"
 set "SCC_MB_STATE=Exit:!errorlevel!"
 if errorlevel 1 echo        [WARN] Malwarebytes wrapper exited with errorlevel !errorlevel! - see the result JSON and message above
 echo        Malwarebytes session ended - continuing.
@@ -381,12 +395,12 @@ set "SCC_PERSIST_ARGS="
 if /i "!SCC_PHASE!"=="OFFLINE" set "SCC_PERSIST_ARGS=-InventorySectionTimeoutSeconds 240 -InventoryTotalTimeoutSeconds 600"
 if /i "!SCC_PHASE!"=="ONLINE" set "SCC_PERSIST_ARGS=-InventorySectionTimeoutSeconds 240 -InventoryTotalTimeoutSeconds 600"
 rem Online half: the offline half's persistence results stay untouched (they are never
-rem overwritten); this second pass, after the scanners, goes to after-scans\persistence.
+rem overwritten); this pass goes to the fresh Online attempt folder.
 if /i "!SCC_PHASE!"=="ONLINE" goto :persist_after_scans
 powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Invoke-PersistenceScan.ps1" -WorkDir "!SCC_RUN_ROOT!" -PreflightRoot "!SCC_RUN_ROOT!" !SCC_PERSIST_ARGS!
 goto :persist_ran
 :persist_after_scans
-powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Invoke-PersistenceScan.ps1" -WorkDir "!SCC_RUN_ROOT!\after-scans" -PreflightRoot "!SCC_RUN_ROOT!" !SCC_PERSIST_ARGS!
+powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Invoke-PersistenceScan.ps1" -WorkDir "!SCC_SCAN_ROOT!" -PreflightRoot "!SCC_RUN_ROOT!" !SCC_PERSIST_ARGS!
 :persist_ran
 set "PERSIST_RC=!errorlevel!"
 if not "!PERSIST_RC!"=="0" (
@@ -403,7 +417,7 @@ echo    Opens the evidence + startup folders, Services and Task Scheduler so you
 echo    can inspect what the persistence scan flagged. Nothing is changed here.
 set /p OPENREVIEW="    Open the review windows now? [Y/n] "
 if /i "%OPENREVIEW%"=="n" goto :skip_6e
-if /i "!SCC_PHASE!"=="ONLINE" powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Show-PersistenceReview.ps1" -WorkDir "!SCC_RUN_ROOT!\after-scans"
+if /i "!SCC_PHASE!"=="ONLINE" powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Show-PersistenceReview.ps1" -WorkDir "!SCC_SCAN_ROOT!"
 if /i not "!SCC_PHASE!"=="ONLINE" powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Show-PersistenceReview.ps1" -WorkDir "!SCC_RUN_ROOT!"
 if errorlevel 1 echo     [WARN] Some review windows could not be opened - see the messages above.
 :skip_6e
@@ -589,6 +603,7 @@ rem New-Item then failed (the folder only appeared later, when preflight created
 rem folder under it). No pipe here, so nothing needs escaping.
 set "SCC_RUN_ROOT="
 if /i "!SCC_PHASE!"=="OFFLINE" goto :new_run_root_locked
+if /i "!SCC_PHASE!"=="ONLINE" goto :new_run_root_locked
 for /f "delims=" %%R in ('powershell -NoProfile -Command "$p=Join-Path 'C:\RIT-SCC' ($env:COMPUTERNAME + '-' + [guid]::NewGuid().ToString('N')); $null = New-Item -ItemType Directory -Path $p -Force; $p"') do set "SCC_RUN_ROOT=%%R"
 exit /b 0
 
@@ -642,8 +657,8 @@ exit /b 0
 :online_share
 echo.
 echo  STEP 5/5: Share the report
-set "SCC_SHARE_PDIR=!SCC_RUN_ROOT!\persistence"
-set "SCC_SHARE_REPORT=!SCC_RUN_ROOT!\report.html"
+set "SCC_SHARE_PDIR=!SCC_SCAN_ROOT!\persistence"
+set "SCC_SHARE_REPORT="
 if "!SCC_SCANNER_ONLY!"=="1" (
     echo     [i] Scanner-only run: there is no offline-half report, so nothing is shared.
     goto :online_done
@@ -653,7 +668,8 @@ if not defined FINDINGS_JSON (
     goto :online_done
 )
 rem The persistence check ran again after the scans: share what the PC looks like now.
-if exist "!SCC_RUN_ROOT!\after-scans\persistence\result.json" call :online_report
+call :online_report
+if not defined SCC_SHARE_REPORT goto :online_done
 set "SCC_REPORT_ARG="
 if exist "!SCC_SHARE_REPORT!" set "SCC_REPORT_ARG=-ReportHtml "!SCC_SHARE_REPORT!""
 if not exist "!SCC_DP0!Submit-ConnectWiseReport.ps1" (
@@ -681,31 +697,33 @@ set FINDINGS_JSON=
 echo.
 echo  ============================================================
 echo   ONLINE HALF finished. Run artifacts: !SCC_RUN_ROOT!
-echo   Scanner results are under logs\ in that folder.
+echo   Current Online evidence: !SCC_SCAN_ROOT!
+echo   Scanner results are under logs\ inside that attempt folder.
 echo  ============================================================
 pause
 goto :done
 
 :online_report
 rem Rebuild the report with the persistence results from after the scans. The offline
-rem report.html stays exactly as it was; the new one is report-after-scans.html.
+rem report.html and every earlier Online report stay unchanged; use this attempt's report.
 set "SCC_OR_ARGS="
 if exist "!SCC_RUN_ROOT!\removal-manifest.json" set "SCC_OR_ARGS=-RemovalManifest "!SCC_RUN_ROOT!\removal-manifest.json""
 if exist "!SCC_RUN_ROOT!\kept-instances.json" set "SCC_OR_ARGS=!SCC_OR_ARGS! -KeptInstances "!SCC_RUN_ROOT!\kept-instances.json""
-set "SCC_AS=!SCC_RUN_ROOT!\after-scans\persistence"
+set "SCC_AS=!SCC_SCAN_ROOT!\persistence"
 set "SCC_POWER_ARG="
 if exist "!SCC_RUN_ROOT!\power-options-repair.json" set "SCC_POWER_ARG=-PowerOptionsRepair "!SCC_RUN_ROOT!\power-options-repair.json""
-powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Write-ScannerSummary.ps1" -WorkDir "!SCC_RUN_ROOT!" -KvrtState !SCC_KVRT_STATE! -EsetState !SCC_ESET_STATE! -MalwarebytesState !SCC_MB_STATE!
+powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Write-ScannerSummary.ps1" -WorkDir "!SCC_SCAN_ROOT!" -KvrtState !SCC_KVRT_STATE! -EsetState !SCC_ESET_STATE! -MalwarebytesState !SCC_MB_STATE!
 set "SCC_SCAN_ARG="
-if exist "!SCC_RUN_ROOT!\scanner_results.json" set "SCC_SCAN_ARG=-ScannerSummary "!SCC_RUN_ROOT!\scanner_results.json""
+if exist "!SCC_SCAN_ROOT!\scanner_results.json" set "SCC_SCAN_ARG=-ScannerSummary "!SCC_SCAN_ROOT!\scanner_results.json""
 echo     [i] Building the report again with the persistence check from after the scans.
-powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!New-InvestigationReport.ps1" -FindingsJson "!FINDINGS_JSON!" !SCC_OR_ARGS! -PersistenceInventory "!SCC_AS!\inventory.json" -PersistenceRemoval "!SCC_AS!\removal.json" -PersistenceResult "!SCC_AS!\result.json" !SCC_POWER_ARG! !SCC_SCAN_ARG! -OutputPath "!SCC_RUN_ROOT!\report-after-scans.html"
-if exist "!SCC_RUN_ROOT!\report-after-scans.html" (
-    set "SCC_SHARE_REPORT=!SCC_RUN_ROOT!\report-after-scans.html"
+powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!New-InvestigationReport.ps1" -FindingsJson "!FINDINGS_JSON!" !SCC_OR_ARGS! -PersistenceInventory "!SCC_AS!\inventory.json" -PersistenceRemoval "!SCC_AS!\removal.json" -PersistenceResult "!SCC_AS!\result.json" !SCC_POWER_ARG! !SCC_SCAN_ARG! -OutputPath "!SCC_ONLINE_REPORT!"
+if errorlevel 1 goto :online_report_failed
+if exist "!SCC_ONLINE_REPORT!" (
+    set "SCC_SHARE_REPORT=!SCC_ONLINE_REPORT!"
     set "SCC_SHARE_PDIR=!SCC_AS!"
-    echo     [i] Sharing report-after-scans.html. The offline report.html is kept unchanged.
+    echo     [i] Sharing !SCC_ONLINE_REPORT!. The Offline report is unchanged.
 ) else (
-    echo     [WARN] Could not build the after-scans report - sharing the offline report instead.
+    goto :online_report_failed
 )
 exit /b 0
 
@@ -732,6 +750,12 @@ exit /b 1
 :removal_failed
 echo [ERROR] Removal reported a failure. Review the current run artifacts.
 pause
+exit /b 1
+
+:online_report_failed
+set "SCC_SHARE_REPORT="
+if "!PIPE_RC!"=="0" set "PIPE_RC=1"
+echo     [WARN] Current Online report was not built; nothing will be shared. Offline report unchanged.
 exit /b 1
 
 :done

@@ -8,7 +8,7 @@ internet?**
 
 | Launcher | Half | Needs internet? | What it does |
 |---|---|---|---|
-| `START-HERE-OFFLINE.bat` | 1 - cleanup (steps 1-7) | **No. Nothing is downloaded or uploaded.** | preflight, before snapshot, detection, ScreenConnect removal (one typed confirmation), persistence review, optional power-options repair, after snapshot + diff, local report + package |
+| `START-HERE-OFFLINE.bat` | 1 - cleanup (steps 1-7) | **No.** | preflight, before snapshot, detection, ScreenConnect removal (one typed confirmation), optional staged KVRT scan, persistence review, optional power-options repair, after snapshot + diff, local report + package; no staging or upload |
 | `START-HERE-ONLINE.bat` | 2 - scan + share (steps 1-5) | **Yes** | stages KVRT / ESET (and the tool pack), runs the attended scanners (KVRT, ESET, Malwarebytes), optional AV uninstall, shares the sanitized report |
 
 These are the console launchers, in the zip's `files\` folder; the window (`START-HERE-GUI.bat`, at
@@ -33,9 +33,13 @@ scam victim's PC with an active remote session):
 `START-HERE-OFFLINE.bat`. The package `connectwise-report.zip` and `report.html`
 stay in the run folder under `C:\RIT-SCC\`. Nothing is shared.
 
-**Preparing a USB stick or a folder for a no-connection job:** nothing to
-prepare - the offline half needs no downloads. (`START-HERE.bat --stage` from a
-command prompt still downloads the scanners and tool pack into the folder.)
+**Preparing a USB stick or a folder for a no-connection job:** run Stage tools
+in the GUI or `START-HERE.bat --stage` while connected, then copy the complete
+folder. Offline offers already-staged KVRT after ScreenConnect removal,
+before the persistence check and final snapshots. Missing KVRT is skipped;
+the cleanup tool does not download replacements. Without staging, the cleanup
+still runs. ESET is Online-only because it needs internet. Malwarebytes installation
+also remains in Online mode because it is not part of the staged pack.
 
 ## How the two halves hand over
 
@@ -54,6 +58,20 @@ does (a scanner can remove or reveal startup items). That second pass goes to
 `after-scans\persistence` (the offline results are never overwritten); the report is
 rebuilt from it as `report-after-scans.html`, and that is what gets shared. The
 offline `report.html` stays as it was.
+
+Every Online attempt reserves a fresh locked folder. If `after-scans` already
+exists (even from an interrupted attempt), the next attempt uses `after-scans-2`,
+then `after-scans-3`, and so on. Its scanner logs, `scanner_results.json`,
+persistence artifacts and GUI log/session file stay inside that attempt folder.
+The report uses the matching name (`report-after-scans-2.html`, for example).
+Offline scanner results and earlier Online reports/evidence remain unchanged.
+The GUI summary and Open report button show the current attempt.
+
+Missing or incomplete current persistence evidence is shown in the new report.
+If that report cannot be generated successfully, nothing is shared; an older
+Offline or Online report is never substituted. Skipping every scanner still
+runs persistence review and the remaining selected Online steps; the GUI logs
+explicitly that no antivirus scan was selected.
 
 When the offline half finishes it writes `phase-offline.json` into its run
 folder (`C:\RIT-SCC\<PC>-<id>`). The online half looks for the newest such
@@ -76,21 +94,18 @@ starts nothing. Before this, the window went straight to the scanners and the cl
 
 ## Differences from the full run you should know about
 
-- **Order.** In the full run the persistence investigation comes *after* the
-  scanners. In the split it comes in the offline half, *before* them, because
-  the offline half cannot run scanners. If a scanner then removes or
-  quarantines something, run `START-HERE-OFFLINE.bat` again: it makes a fresh
-  run folder and repeats detection and the persistence review (the persistence
-  scan refuses to write into a run folder that already has results, so it
-  cannot simply be repeated inside the same one).
+- **Order.** Offline runs any selected staged scanners before its persistence
+  investigation and final snapshot and diff. Online checks persistence again after
+  its scanners, preserving the offline evidence under the original run folder.
 - **Package without upload.** The offline half builds `connectwise-report.zip`
   with `-NoUpload`. The online half runs the sharer again, which makes a second,
   timestamp-named zip in the same folder (the existing one is never overwritten).
 - **Malwarebytes** is still installed when its step runs (winget, then the
   official installer download), so it belongs to the online half. It is not
   pre-staged by `START-HERE.bat --stage`.
-- **KVRT and the ESET Online Scanner are online scanners.** They fetch fresh
-  databases when they start, so they are in the online half on purpose.
+- **Staged scanners.** Offline attempts locally staged KVRT with the same
+  attended launch and signature checks as Online. ESET is skipped in Offline
+  even when its EXE is staged, because it needs internet.
 - **AV uninstall** (attended, default No) is in the online half, after the
   scanners, as in the full run. Its Malwarebytes path uses winget.
 - **The Sysinternals tool pack is not used by the guided steps** (only the
@@ -147,12 +162,29 @@ What select mode does **not** do:
 - The kept choice is per run. It is not remembered; the next run asks again.
 - The direct runner `sc-cleanup.ps1` has no select mode (unchanged).
 
+## Choosing Online after Offline in the window
+
+When Online finds a completed Offline run, the window offers:
+
+- **Continue Offline run:** use its evidence and folder, run selected scanners,
+  check persistence again and offer antivirus uninstall. Update the combined
+  report; upload it only if sharing is ticked.
+- **Start separate scans:** use a new folder for selected scanners, persistence
+  and optional antivirus uninstall. The Offline evidence/report stays unchanged;
+  no combined report is created or uploaded.
+- **Cancel**, or the window X: start nothing.
+
+Neither scan choice repeats ScreenConnect detection or removal. The scanner
+selection is shown again, so KVRT can be run again after an Offline scan. Online
+may download scanner tools. The earlier-run list is for viewing; use Online to
+continue a completed Offline run.
+
 ## Direct runner
 
 `sc-cleanup.ps1` already had `-offline` (use the pre-staged pack, download
-nothing) and `-sa` (no scanners), and `-NoShare` (no upload). The offline half
-of the guided runner is the equivalent of `-offline -sa -NoShare` for that
-runner; nothing about `sc-cleanup.ps1` changed.
+nothing) and `-sa` (no scanners), and `-NoShare` (no upload). The guided Offline
+half now offers staged KVRT, so it no longer corresponds to skipping all
+scanners with `-sa`. Nothing about `sc-cleanup.ps1` changed.
 
 ## What changed in the code
 

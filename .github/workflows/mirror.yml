@@ -9,6 +9,11 @@ on:
     tags: ['**']
   workflow_dispatch:
 
+# one mirror run at a time, so an older run can never force-push stale refs over a newer one
+concurrency:
+  group: mirror
+  cancel-in-progress: false
+
 jobs:
   mirror:
     # the mirror repo receives this same file; do nothing there

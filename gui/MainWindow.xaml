@@ -4,6 +4,8 @@
         WindowStartupLocation="CenterScreen" FontFamily="Segoe UI" FontSize="13"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         Background="{DynamicResource Brush.Background}" Foreground="{DynamicResource Brush.Foreground}">
+  <!-- The Window.Resources block below is COPIED VERBATIM into remote-diagnostics\gui\MainWindow.xaml (rinv-ai repo,
+       2026-11-15). Kept in sync by hand. -->
   <Window.Resources>
     <!-- ===================================================================================
          Design tokens. Every colour in this window (and in the parts the script builds in

@@ -1,0 +1,28 @@
+# Copy to .github/workflows/mirror.yml in the SOURCE repo pupontech/screenconnect-cleanup (already set to push to
+# RubinITCompTelecom/screenconnect-cleanup; for any other project change that line).
+# Needs the secret MIRROR_SSH_KEY (private deploy key; its public half has write access on the org repo).
+name: Mirror to org
+on:
+  push:
+    branches: ['**']
+    tags: ['**']
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Push to org repo
+        env:
+          KEY: ${{ secrets.MIRROR_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          git remote add mirror git@github.com:RubinITCompTelecom/screenconnect-cleanup.git
+          git push mirror --all --force
+          git push mirror --tags --force

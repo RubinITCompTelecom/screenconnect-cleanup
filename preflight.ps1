@@ -278,7 +278,7 @@ function Test-ToolPack {
     }
     Write-Stage ("Verifying tool pack via {0} ..." -f $ScriptPath)
     try {
-        & $ScriptPath -Verify -Quiet
+        & $ScriptPath -Verify -Quiet | Out-Null
         $rc = $LASTEXITCODE
     } catch {
         Write-StageFail ("Tool pack verification threw: {0}" -f $_.Exception.Message)

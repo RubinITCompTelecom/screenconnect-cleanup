@@ -83,8 +83,8 @@ function Disable-ReportOpen {
     # Fail loudly if the lines move, so the test cannot silently start opening windows again.
     param([string]$Text)
     $openers = @(
-        @('explorer /select,"!SCC_RUN_ROOT!/report.html"', 'echo [test] report.html would be selected in Explorer'),
-        @('start "" "!SCC_RUN_ROOT!/report.html"', 'echo [test] report.html would be opened')
+        @('explorer /select,"!SCC_RUN_ROOT!\report.html"', 'echo [test] report.html would be selected in Explorer'),
+        @('start "" "!SCC_RUN_ROOT!\report.html"', 'echo [test] report.html would be opened')
     )
     foreach ($pair in $openers) {
         if (-not $Text.Contains($pair[0])) { throw ('Test-PhaseSplit: report opener not found in START-HERE.bat: ' + $pair[0]) }

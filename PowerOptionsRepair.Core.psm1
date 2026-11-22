@@ -323,7 +323,7 @@ function Invoke-PowerOptionsRepairPlan {
         }
         if ($gpoBackupOk) {
             try {
-                $gpoOk = [bool](Invoke-PowerRepairAdapter -Adapter $Adapter -Name 'ResetLocalGpo' -Arguments @(@($Plan.LocalGpoPaths)))
+                $gpoOk = [bool](Invoke-PowerRepairAdapter -Adapter $Adapter -Name 'ResetLocalGpo' -Arguments (,@($Plan.LocalGpoPaths)))
                 if ($gpoOk) { Add-PowerRepairActionResult -Results $results -Action 'ResetLocalGpo' -Status 'Completed' }
                 else { Add-PowerRepairActionResult -Results $results -Action 'ResetLocalGpo' -Status 'Failed'; $hadFailure = $true }
             } catch {

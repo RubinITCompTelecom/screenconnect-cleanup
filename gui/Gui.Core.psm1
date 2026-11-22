@@ -283,8 +283,12 @@ function Resolve-GuiListToken {
         'PreflightArgs' { if ($phase -eq 'OFFLINE' -or $phase -eq 'DETECT') { return @('-SkipToolPack') }; return @() }
         'PersistArgs'   { if ($phase -eq 'OFFLINE' -or $phase -eq 'ONLINE') { return @('-InventorySectionTimeoutSeconds', '240', '-InventoryTotalTimeoutSeconds', '600') }; return @() }
         'AfterScansReportArgs' {
-            # batch :online_report SCC_OR_ARGS - the removal manifest first, then the kept instances.
+            # Online report evidence is selected from this run root only.
             $out = @()
+            $d = $Session.RunRoot + '\snapshot_diff.json'
+            if (Test-Path -LiteralPath $d -PathType Leaf) { $out += @('-DiffPath', $d) }
+            $av = $Session.RunRoot + '\logs\av-uninstall-results.json'
+            if (Test-Path -LiteralPath $av -PathType Leaf) { $out += @('-AVUninstall', $av) }
             $m = $Session.RunRoot + '\removal-manifest.json'
             if (Test-Path -LiteralPath $m -PathType Leaf) { $out += @('-RemovalManifest', $m) }
             $k = $Session.RunRoot + '\kept-instances.json'
@@ -298,6 +302,21 @@ function Resolve-GuiListToken {
             $ids = @($Session.Answers['KeepIdentifiers'] | Where-Object { $_ })
             if ($ids.Count -gt 0) { return @('-KeepIdentifier', ($ids -join ',')) }
             return @()
+        }
+        'StageMissing' {
+            $missing = @()
+            foreach ($pair in @(@('KVRT.exe','tools\AV\KVRT.exe'),@('esetonlinescanner.exe','tools\AV\esetonlinescanner.exe'),@('Sysinternals tool pack','tools\manifest.json'))) {
+                if (-not (Test-Path -LiteralPath (Join-Path $Session.ToolRoot $pair[1]) -PathType Leaf)) { $missing += $pair[0] }
+            }
+            return $missing
+        }
+        'ReportEvidenceArgs' {
+            $out = @()
+            $d = $Session.RunRoot + '\snapshot_diff.json'
+            if (Test-Path -LiteralPath $d -PathType Leaf) { $out += @('-DiffPath', $d) }
+            $av = $Session.RunRoot + '\logs\av-uninstall-results.json'
+            if (Test-Path -LiteralPath $av -PathType Leaf) { $out += @('-AVUninstall', $av) }
+            return $out
         }
         'KeptArg' {
             $f = $Session.RunRoot + '\kept-instances.json'
@@ -554,8 +573,16 @@ function Complete-GuiAction {
             'WarnPipe' { $status = 'Warn'; Set-GuiPipeRc $Session $ExitCode; $text = ($(if ($nonZeroText) { $nonZeroText } else { 'Exited ' + $ExitCode + '.' }) + ' (exit ' + $ExitCode + ')') }
             'Stop' { $status = 'Failed'; $stop = $true; $text = [string](Get-GuiCallProp $call 'StopMessage' ('Failed with exit ' + $ExitCode + '.')) }
             'Diff' {
-                if ($ExitCode -ge 2) { $status = 'Warn'; $text = 'Diff failed to run.' }
-                else { $status = 'Resurrection'; $text = 'RESURRECTION DETECTED - removed items came back. See snapshot_diff.json.' }
+                # RESURRECTION is a finding, not a failure (same rule as sc-cleanup.ps1 and
+                # START-HERE.bat); INCOMPLETE, unreadable and failed-to-run change the run's code.
+                if ($ExitCode -ge 2) { $status = 'Warn'; $text = 'Diff failed to run.'; Set-GuiPipeRc $Session $ExitCode }
+                else {
+                    $diff = Read-GuiJson -Path (Join-Path $Session.RunRoot 'snapshot_diff.json')
+                    $verdict = if ($diff.Ok) { [string](Get-GuiProp $diff.Data 'Verdict') } else { '' }
+                    if ($verdict -eq 'INCOMPLETE') { $status = 'Warn'; $text = 'Diff INCOMPLETE - some evidence could not be collected.'; Set-GuiPipeRc $Session 1 }
+                    elseif ($verdict -eq 'RESURRECTION') { $status = 'Resurrection'; $text = 'RESURRECTION DETECTED - removed items came back. See snapshot_diff.json.' }
+                    else { $status = 'Warn'; $text = 'Diff result could not be read.'; Set-GuiPipeRc $Session 1 }
+                }
             }
         }
     } elseif ($rule -eq 'Diff') {
@@ -582,7 +609,7 @@ function Complete-GuiAction {
             'MarkReport' {
                 $Session.ReportRc = $ExitCode
                 $Session.ReportOpened = $false
-                if (-not (Test-Path -LiteralPath ($Session.RunRoot + '/report.html') -PathType Leaf)) {
+                if (-not (Test-Path -LiteralPath ($Session.RunRoot + '\report.html') -PathType Leaf)) {
                     Set-GuiPipeRc $Session 1
                     $status = 'Warn'; $text = 'Report was not produced.'
                 }

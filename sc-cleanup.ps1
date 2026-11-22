@@ -67,7 +67,7 @@ if (($ResetLocalGpo -or $AllowManagedDevice) -and -not $RepairPowerOptions) {
 # -----------------------------------------------------------------------------
 # Constants & script metadata
 # -----------------------------------------------------------------------------
-$ScriptVersion = '1.8.12-beta.1'
+$ScriptVersion = '1.8.13-beta.1'
 $ScriptName = 'sc-cleanup.ps1'
 $PipelineStages = @(
     @{ Id = 0; Name = 'Preflight';            SkipFlag = '' },
@@ -903,6 +903,9 @@ try { $stage5Result = Invoke-Stage -StageId 5 -StageName 'Scanners' -SkipFlag 's
         foreach ($launch in $scannerLaunches) {
             Write-StageLog ("Launching " + $launch.Scanner + " for attended scan (technician drives the GUI)...")
             $scannerResultPath = Join-Path $logsDir ('scanner-' + $launch.Scanner + '-result.json')
+            # Session start of THIS scanner launch (reset per scanner); binds the
+            # findings parser to reports written during this session.
+            $scannerSessionStartUtc = ''
             $scannerArgs = @('-Scanner', $launch.Scanner, '-TimeoutMinutes', '240', '-ResultPath', $scannerResultPath)
             $rc = Invoke-ChildScript -ScriptPath $guiScanner -ArgumentList $scannerArgs -LogTag ("Scanner(" + $launch.Scanner + ")") -Interactive
             $status = 'Completed'
@@ -916,6 +919,8 @@ try { $stage5Result = Invoke-Stage -StageId 5 -StageName 'Scanners' -SkipFlag 's
             if (Test-Path -LiteralPath $scannerResultPath) {
                 try {
                     $childResult = Get-Content -LiteralPath $scannerResultPath -Raw | ConvertFrom-Json
+                    $childStartUtc = Get-PropertyValue $childResult 'StartTimeUtc'
+                    if ($childStartUtc) { $scannerSessionStartUtc = [string]$childStartUtc }
                     $childStatus = Get-PropertyValue $childResult 'Status'
                     if ($childStatus) { $record['ChildStatus'] = [string]$childStatus }
                     $childFilterSuspected = Get-PropertyValue $childResult 'FilterSuspected'
@@ -950,7 +955,7 @@ try { $stage5Result = Invoke-Stage -StageId 5 -StageName 'Scanners' -SkipFlag 's
             $findingsScript = Join-Path $ScriptRoot 'Get-ScannerFindings.ps1'
             if ($status -eq 'Completed' -and (Test-Path -LiteralPath $findingsScript)) {
                 try {
-                    $findingsResult = & $findingsScript -Scanner $launch.Scanner
+                    $findingsResult = & $findingsScript -Scanner $launch.Scanner -SessionStartTimeUtc $scannerSessionStartUtc
                     if ($findingsResult) {
                         $record['Findings'] = $findingsResult
                         $record['FindingsPath'] = $null

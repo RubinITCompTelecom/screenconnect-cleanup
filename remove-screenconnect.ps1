@@ -123,7 +123,7 @@ function Add-ManifestEntry {
         [string]$Target,
         [string]$Result,
         [string]$Details = '',
-        [int]$ExitCode = $null,
+        [object]$ExitCode = $null,
         [string]$SourcePath = '',
         [string]$DestinationPath = '',
         [string]$SourceIdentity = ''
@@ -441,7 +441,7 @@ function Run-BoundedProcess {
         if ($timedOut) {
             try { $proc.Kill() } catch { }
             # Reap the process after kill to avoid zombies
-            $proc.WaitForExit(1000)
+            $null = $proc.WaitForExit(1000)
         }
 
         # Bounded reap of both async reads after process termination (or kill)
@@ -993,6 +993,7 @@ $script:RebootPendingInstanceIds = New-Object System.Collections.ArrayList
 $script:DeferredQuarantineInstanceIds = New-Object System.Collections.ArrayList
 $script:DeferredQuarantineRecords = New-Object System.Collections.ArrayList
 $script:PriorVerifiedInstanceIds = New-Object System.Collections.ArrayList
+$script:PriorManifestEntries = New-Object System.Collections.ArrayList
 $script:ResumeMarkerWriteFailed = $false
 $script:ResumeMarkerIdentityFailed = $false
 
@@ -1080,6 +1081,7 @@ if ($Resume) {
         try {
             $oldManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
             foreach ($oldEntry in @($oldManifest.Entries)) {
+                if ($null -ne $oldEntry) { [void]$script:PriorManifestEntries.Add($oldEntry) }
                 $oldAction = Get-EntryPropertySafe -Instance $oldEntry -PropertyName 'Action'
                 $oldResult = Get-EntryPropertySafe -Instance $oldEntry -PropertyName 'Result'
                 $oldId = [string](Get-EntryPropertySafe -Instance $oldEntry -PropertyName 'InstanceId')
@@ -1162,7 +1164,7 @@ function Get-UninstallEntriesForInstance {
         'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
         'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
     )
-    $matches = New-Object System.Collections.ArrayList
+    $uninstallEntries = New-Object System.Collections.ArrayList
     foreach ($hive in @(Get-ChildItem -LiteralPath 'Registry::HKEY_USERS' -ErrorAction SilentlyContinue)) {
         if ($hive.PSChildName -match '^S-1-(?:5-21|12-1)-[0-9]+-[0-9]+-[0-9]+-[0-9]+$') {
             $roots += 'Registry::HKEY_USERS\' + $hive.PSChildName + '\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
@@ -1180,17 +1182,17 @@ function Get-UninstallEntriesForInstance {
                         # If instance identifier provided, try to match it
                         if ($InstanceIdentifier) {
                             if ($p.DisplayName -like "*$InstanceIdentifier*" -or ($p.InstallLocation -and $p.InstallLocation -like "*$InstanceIdentifier*")) {
-                                [void]$matches.Add($p)
+                                [void]$uninstallEntries.Add($p)
                             }
                         } else {
-                            [void]$matches.Add($p)
+                            [void]$uninstallEntries.Add($p)
                         }
                     }
                 } catch { }
             }
         } catch { }
     }
-    return $matches.ToArray()
+    return $uninstallEntries.ToArray()
 }
 
 # -----------------------------------------------------------------------------
@@ -2338,6 +2340,14 @@ foreach ($inst in $scInstancesArray) {
     }
 }
 
+if ($Resume -and $Execute) {
+    foreach ($resumeStatus in @($script:ResumeStatuses)) {
+        if ($resumeStatus.Status -ne 'RebootPending') {
+            Remove-ResumeTask -InstanceId ([string]$resumeStatus.InstanceId)
+        }
+    }
+}
+
 $finalMarkerOk = Write-ResumeMarker -Phase 'session-complete'
 if ($Execute -and -not $finalMarkerOk) {
     $script:ResumeMarkerWriteFailed = $true
@@ -2352,6 +2362,20 @@ if ($Execute -and $script:ResumeMarkerWriteFailed) {
 # -----------------------------------------------------------------------------
 Write-Section "Writing removal manifest"
 
+function Merge-ManifestEntries {
+    param([object[]]$PriorEntries, [object[]]$CurrentEntries)
+    $merged = New-Object System.Collections.ArrayList
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($entry in @($PriorEntries) + @($CurrentEntries)) {
+        if ($null -eq $entry) { continue }
+        $entryJson = ConvertTo-Json -InputObject $entry -Depth 10 -Compress
+        if ($seen.Add([string]$entryJson)) { [void]$merged.Add($entry) }
+    }
+    return $merged.ToArray()
+}
+$manifestEntries = @(Merge-ManifestEntries -PriorEntries $script:PriorManifestEntries.ToArray() -CurrentEntries $script:Manifest.ToArray())
+$script:Manifest.Clear()
+foreach ($mergedEntry in $manifestEntries) { [void]$script:Manifest.Add($mergedEntry) }
 $manifestObj = [PSCustomObject]@{
     Script           = $ScriptName
     Version          = $ScriptVersion
@@ -2362,7 +2386,7 @@ $manifestObj = [PSCustomObject]@{
     QuarantineDir    = $quarantineDir
     ExecuteMode      = $Execute.IsPresent
     ResumeMode       = $Resume.IsPresent
-    Entries          = $script:Manifest.ToArray()
+    Entries          = @($manifestEntries)
 }
 
 try {

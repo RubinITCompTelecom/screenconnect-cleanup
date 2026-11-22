@@ -84,7 +84,7 @@ try { $common=[Environment]::GetFolderPath('CommonStartup'); if($common){Add-Fol
 # Startup folders actually observed by the scan (covers loaded user profiles).
 foreach($item in (Get-List (Get-Value $sections 'StartupFiles') 'Items')) {
     $filePath=[string](Get-Value $item 'FilePath')
-    if($filePath){ Add-Folder -Path (Split-Path -Parent $filePath) -Label ('Startup folder (' + [string](Get-Value $item 'UserName') + ')') }
+    if($filePath){ Add-Folder -Path (Split-Path -Parent $filePath) -Label ('Startup folder (' + [string](Get-Value $item 'User') + ')') }
 }
 
 $consoles=@(

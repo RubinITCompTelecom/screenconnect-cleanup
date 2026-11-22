@@ -311,7 +311,13 @@ function Update-Stepper {
         }
         $word = 'waiting'; $note = ''; $bg = ''; $fg = 'Muted'; $dotTone = 'BorderStrong'; $active = $false
         $res = $null
-        if ($script:Session) { $res = @($script:Session.Results | Where-Object { $_.StepId -eq $id }) | Select-Object -Last 1 }
+        if ($script:Session) {
+            $calls = @($script:Session.Results | Where-Object { $_.StepId -eq $id })
+            if ($calls.Count) {
+                $rank = @{ Failed = 5; Resurrection = 4; Warn = 3; Cancelled = 2; Done = 1; Skipped = 0 }
+                $res = $calls | Sort-Object { if ($rank.ContainsKey($_.Status)) { $rank[$_.Status] } else { -1 } } -Descending | Select-Object -First 1
+            }
+        }
         if ($script:Action -and $script:Action.StepId -eq $id) {
             $active = $true
             if ($script:Action.Kind -eq 'Ask') { $word = 'waiting for you'; $bg = 'WarningBg'; $fg = 'WarningFg' }
@@ -1047,10 +1053,19 @@ function Complete-Run {
     $tail = ''
     if ($sess.Mode -eq 'Detect') { $tail = ' To remove ScreenConnect, start over and choose the Offline half.' }
     elseif ($sess.Mode -eq 'Offline') { $tail = ' Nothing was downloaded or uploaded. When this PC is online, start the Online half to run the scanners and share the report.' }
+    # Stage tools: name what is missing even when a download step already warned.
+    $stageMissing = @()
+    if ($sess.Mode -eq 'Stage') {
+        foreach ($pair in @(@('KVRT.exe','tools\AV\KVRT.exe'),@('esetonlinescanner.exe','tools\AV\esetonlinescanner.exe'))) {
+            if (-not (Test-Path -LiteralPath (Join-Path $sess.ToolRoot $pair[1]) -PathType Leaf)) { $stageMissing += $pair[0] }
+        }
+    }
     if ($sess.Stopped) {
         Show-Banner ($sess.StopMessage + ' See the console output below and the log.') 'bad'
     } elseif ($resur -gt 0) {
         Show-Banner ('RESURRECTION DETECTED: items that were removed came back. See snapshot_diff.json in the run folder.' + $tail) 'bad'
+    } elseif ($stageMissing.Count -gt 0) {
+        Show-Banner ('Staging incomplete. Missing: ' + ($stageMissing -join ', ') + '. Fix the connection and run Stage tools again before taking this folder to the client PC.') 'warn'
     } elseif ((Get-GuiFinalStatus $sess) -ne 0 -or $warns -gt 0) {
         Show-Banner ('Finished with warnings (' + $warns + ' step(s) marked; first non-zero code ' + (Get-GuiFinalStatus $sess) + '). Review the steps marked with a warning.' + $tail) 'warn'
     } elseif ($sess.Mode -eq 'Stage') {
@@ -1098,7 +1113,10 @@ function Show-RunSummary {
     # What the run's own artifacts say (design 6, panels 6d, 8 and 9). Read-only; nothing here is a verdict.
     param($Sess)
     $res = @{}
-    foreach ($r in $Sess.Results) { $res[$r.StepId] = $r }
+    $rank = @{ Failed = 5; Resurrection = 4; Warn = 3; Cancelled = 2; Done = 1; Skipped = 0 }
+    foreach ($r in $Sess.Results) {
+        if (-not $res.ContainsKey($r.StepId) -or -not $rank.ContainsKey($res[$r.StepId].Status) -or $rank[$r.Status] -gt $rank[$res[$r.StepId].Status]) { $res[$r.StepId] = $r }
+    }
     $planIds = @($Sess.Plan | ForEach-Object { $_.StepId })
     $head = New-Object System.Windows.Controls.TextBlock
     $head.Text = 'Results'; $head.FontSize = 15; $head.FontWeight = 'SemiBold'; $head.Margin = New-Object System.Windows.Thickness(0, 12, 0, 6)
@@ -1158,7 +1176,7 @@ function Show-RunSummary {
         if ($s.Status -eq 'Skipped') { Add-SummaryLine 'Report share' ('not shared - ' + $s.Message) 'Muted' }
         elseif ($s.Status -eq 'Done' -and -not [bool]$Sess.Answers['ShareReport']) { Add-SummaryLine 'Report share' 'not shared - you unticked sharing. The report and connectwise-report.zip are on this PC only.' 'Muted' }
         elseif ($s.Status -ne 'Done') { Add-SummaryLine 'Report share' ('failed - ' + $s.Message + ' The local report is kept.') 'DangerFg' }
-        elseif ($sid -eq '9o' -and $script:ShareSkipped) { Add-SummaryLine 'Report share' ('NOT shared - ' + $script:ShareSkipped + ' (microbin-url.txt beside the tool is empty). The report and connectwise-report.zip are on this PC only.') 'WarningFg' }
+        elseif ($script:ShareSkipped) { Add-SummaryLine 'Report share' ('NOT shared - ' + $script:ShareSkipped + ' (microbin-url.txt beside the tool is empty). The report and connectwise-report.zip are on this PC only.') 'WarningFg' }
         elseif ($script:ShareUrl) { Add-SummaryLine 'Report shared - paste link' $script:ShareUrl -Selectable }
         elseif ($Sess.Phase -eq 'OFFLINE') { Add-SummaryLine 'Report' 'package built on this PC, not uploaded (the Online half shares it)' 'Muted' }
         else { Add-SummaryLine 'Report share' 'done (no paste link was printed)' 'Muted' }

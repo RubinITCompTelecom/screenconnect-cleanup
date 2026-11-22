@@ -159,7 +159,7 @@ def main() -> int:
     args = parser.parse_args()
     if hasattr(os, "geteuid") and os.geteuid() != 0:
         parser.error("bulk export must run as root")
-    count = build_bulk_archive(Path(args.storage_dir), Path(args.identity_file), Path(args.output))
+    count = build_bulk_archive(Path(args.storage_dir), Path(args.identity_file), Path(args.output), since_unix=args.since_unix)
     print("exported %d report(s)" % count)
     return 0
 

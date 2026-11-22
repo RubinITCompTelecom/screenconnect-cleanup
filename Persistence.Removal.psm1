@@ -34,7 +34,7 @@ function Get-SccStartupRoots {
     try {
         $profiles=Get-ItemProperty -LiteralPath 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList' -ErrorAction Stop
         foreach ($sid in (Get-ChildItem -LiteralPath 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList' -ErrorAction Stop)) {
-            if ($sid.PSChildName -notmatch '^S-1-5-21-(?:\d+-){3}\d+$') { continue }
+            if ($sid.PSChildName -notmatch '^S-1-(?:5-21|12-1)-(?:\d+-){3}\d+$') { continue }
             $profile=[string](Get-ItemProperty -LiteralPath $sid.PSPath -Name ProfileImagePath -ErrorAction Stop).ProfileImagePath
             if (-not $profile) { continue }
             $profile=[Environment]::ExpandEnvironmentVariables($profile)
@@ -48,7 +48,7 @@ function Test-SccRegistryPath {
     $p=$Path -replace '^HKLM:','Registry::HKEY_LOCAL_MACHINE' -replace '^HKCU:','Registry::HKEY_CURRENT_USER'
     $base='Software\\Microsoft\\Windows\\CurrentVersion\\(Run|RunOnce|RunServices|Policies\\Explorer\\Run)'
     $wow='Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\(Run|RunOnce|RunServices)'
-    if ($p -match ('^Registry::HKEY_LOCAL_MACHINE\\'+$base+'$') -or $p -match ('^Registry::HKEY_LOCAL_MACHINE\\'+$wow+'$') -or $p -match ('^Registry::HKEY_CURRENT_USER\\'+$base+'$') -or $p -match ('^Registry::HKEY_USERS\\S-1-5-21-(?:\d+-){3}\d+\\'+$base+'$')) { return $p }
+    if ($p -match ('^Registry::HKEY_LOCAL_MACHINE\\'+$base+'$') -or $p -match ('^Registry::HKEY_LOCAL_MACHINE\\'+$wow+'$') -or $p -match ('^Registry::HKEY_CURRENT_USER\\'+$base+'$') -or $p -match ('^Registry::HKEY_USERS\\S-1-(?:5-21|12-1)-(?:\d+-){3}\d+\\'+$base+'$')) { return $p }
     throw 'Registry path is not an explicitly approved Run/RunOnce/RunServices/Explorer Run key.'
 }
 function Get-SccRegistryValue {

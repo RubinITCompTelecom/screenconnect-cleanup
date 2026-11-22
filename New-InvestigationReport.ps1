@@ -699,7 +699,7 @@ if ($AVUninstall) {
 <section id="av-uninstall">
   <h2>Installed antivirus / security products uninstalled</h2>
   $avNote
-  <div class="table-scroll"><table class="data-table"><thead><tr><th>Product</th><th>Status</th><th>Opened (UTC)</th><th>Closed (UTC)</th><th>Uninstall command</th><th>Leftovers</th></tr></thead><tbody>$rows</tbody></table></div>
+  <div class="table-scroll"><table class="data-table"><thead><tr><th>Product</th><th>Status</th><th>Opened (local time)</th><th>Closed (local time)</th><th>Uninstall command</th><th>Leftovers</th></tr></thead><tbody>$rows</tbody></table></div>
   <p class="muted">These products were opened for attended removal. Confirm each was fully uninstalled before leaving the site; a machine should not be left without working AV unless a replacement is being deployed.</p>
 </section>
 "@
@@ -750,9 +750,10 @@ if ($ScannerSummary -or $ScannersSkipped) {
             if ($null -eq $scannerExitCode) { $scannerExitCode = Get-Prop $s 'ProcessExitCode' }
             $findingsSummaryCell = ''
             if ($scannerFindings) {
+                $findingsError = [string](Get-Prop $scannerFindings 'Error')
                 $notParseable = [string](Get-Prop $scannerFindings 'NotParseable')
-                if ($notParseable -match '(?i)^(true|1|yes)$') {
-                    $findingsSummaryCell = '<span class="muted">Not parseable</span>'
+                if (-not [string]::IsNullOrWhiteSpace($findingsError) -or $notParseable -match '(?i)^(true|1|yes)$') {
+                    $findingsSummaryCell = '<span class="muted">Results not available</span>'
                 } else {
                     $threatCount = [int](Get-Prop $scannerFindings 'ThreatCount')
                     if ($threatCount -gt 0) {
@@ -778,7 +779,8 @@ if ($ScannerSummary -or $ScannersSkipped) {
             # Build detailed findings display for this scanner
             if ($scannerFindings) {
                 $np = [string](Get-Prop $scannerFindings 'NotParseable')
-                if ($np -match '(?i)^(true|1|yes)$') {
+                $findingsError = [string](Get-Prop $scannerFindings 'Error')
+                if (-not [string]::IsNullOrWhiteSpace($findingsError) -or $np -match '(?i)^(true|1|yes)$') {
                     $parseNote = [string](Get-Prop $scannerFindings 'Error')
                     if ([string]::IsNullOrWhiteSpace($parseNote)) { $parseNote = 'Scan results are not available in a parseable format.' }
                     $findingsDisplay += "<p class='muted'><strong>$(Fmt $scannerName):</strong> $(Fmt $parseNote)</p>`n"

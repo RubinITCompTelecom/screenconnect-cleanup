@@ -310,7 +310,7 @@ function Get-PowerRepairTreeManifest {
         }
     }
     $sorted = @($records.ToArray() | Sort-Object Path)
-    return ,$sorted
+    return $sorted
 }
 
 function Backup-PowerRepairLocalGpo {

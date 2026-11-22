@@ -1,7 +1,8 @@
 # Copy to .github/workflows/mirror.yml in the SOURCE repo pupontech/screenconnect-cleanup (already set to push to
-# RubinITCompTelecom/screenconnect-cleanup; for any other project change that line).
-# Needs the secret MIRROR_SSH_KEY (private deploy key; its public half has write access on the org repo).
-name: Mirror to org
+# RubinITCompTelecom/screenconnect-cleanup; for any other project change the repo name in the `if:` and the remote line).
+# Needs the secret MIRROR_SSH_KEY (private deploy key; its public half has write access on the mirror repo).
+# Mirrors EVERY branch and tag (checkout only makes the triggering branch local, so we push the origin/* refs).
+name: Mirror to RubinITCompTelecom
 on:
   push:
     branches: ['**']
@@ -10,12 +11,14 @@ on:
 
 jobs:
   mirror:
+    # the mirror repo receives this same file; do nothing there
+    if: github.repository == 'pupontech/screenconnect-cleanup'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Push to org repo
+      - name: Push to mirror repo
         env:
           KEY: ${{ secrets.MIRROR_SSH_KEY }}
         run: |
@@ -24,5 +27,7 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan github.com >> ~/.ssh/known_hosts
           git remote add mirror git@github.com:RubinITCompTelecom/screenconnect-cleanup.git
-          git push mirror --all --force
+          for b in $(git for-each-ref --format='%(refname:strip=3)' refs/remotes/origin | grep -v '^HEAD$'); do
+            git push mirror --force "refs/remotes/origin/$b:refs/heads/$b"
+          done
           git push mirror --tags --force

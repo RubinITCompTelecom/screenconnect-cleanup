@@ -190,7 +190,7 @@
                    "-PersistenceInventory", "{PersistWorkDir}\\persistence\\inventory.json",
                    "-PersistenceRemoval", "{PersistWorkDir}\\persistence\\removal.json",
                    "-PersistenceResult", "{PersistWorkDir}\\persistence\\result.json",
-                   "{@PowerArgBs}", "{@ScannerArgs}",
+                   "{@PowerArgBs}", "{@ScannerArgs}", "{@ReportEvidenceArgs}",
                    "-OutputPath", "{OnlineReport}"],
           "When": ["Not:ScannerOnly", "Has:FindingsJson"],
           "SkipText": "No Offline findings for a combined report; nothing will be shared.",

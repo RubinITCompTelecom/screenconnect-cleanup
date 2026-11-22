@@ -10,6 +10,9 @@
     * reads artifacts the engine scripts already wrote (Get-GuiFindingsView and friends).
   It contains no detection, snapshot, removal, scanner, persistence or report logic.
 
+  COPIED INTO remote-diagnostics\gui\ (rinv-ai repo, 2026-11-15) for the Remote Diagnostics window: ConvertTo-GuiArg, the console-encoding fix, the child-process pump (Start/Update/Stop-GuiChild, Send-GuiAnswer) and the unknown-prompt rule. Known bug found there: @($ArgumentList).Count throws under StrictMode when no argument list is passed (fixed in the copy; this file always passes one).
+  Kept in sync by hand - when changing those parts here, check the copy there too.
+
   Because it has no WPF types it is tested headless (tests\gui\*). Windows PowerShell 5.1,
   pure ASCII, no BOM.
 #>
@@ -285,10 +288,7 @@ function Resolve-GuiListToken {
         'AfterScansReportArgs' {
             # Online report evidence is selected from this run root only.
             $out = @()
-            $d = $Session.RunRoot + '\snapshot_diff.json'
-            if (Test-Path -LiteralPath $d -PathType Leaf) { $out += @('-DiffPath', $d) }
-            $av = $Session.RunRoot + '\logs\av-uninstall-results.json'
-            if (Test-Path -LiteralPath $av -PathType Leaf) { $out += @('-AVUninstall', $av) }
+            # The diff and AV-uninstall evidence come from {@ReportEvidenceArgs}, in the batch launcher's order.
             $m = $Session.RunRoot + '\removal-manifest.json'
             if (Test-Path -LiteralPath $m -PathType Leaf) { $out += @('-RemovalManifest', $m) }
             $k = $Session.RunRoot + '\kept-instances.json'
@@ -313,7 +313,8 @@ function Resolve-GuiListToken {
         'ReportEvidenceArgs' {
             $out = @()
             $d = $Session.RunRoot + '\snapshot_diff.json'
-            if (Test-Path -LiteralPath $d -PathType Leaf) { $out += @('-DiffPath', $d) }
+            # Always passed: a missing or unusable diff must show in the report as unavailable, never as silence.
+            $out += @('-DiffPath', $d)
             $av = $Session.RunRoot + '\logs\av-uninstall-results.json'
             if (Test-Path -LiteralPath $av -PathType Leaf) { $out += @('-AVUninstall', $av) }
             return $out

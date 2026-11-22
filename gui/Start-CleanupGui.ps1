@@ -18,6 +18,9 @@
     * removal needs the technician to type the word REMOVE, then the script's own y/N follows;
     * nothing is remembered between runs and there is no unattended mode.
 
+  COPIED INTO remote-diagnostics\gui\ (rinv-ai repo, 2026-11-15) for the Remote Diagnostics window: the DPI block, Set-GuiTheme / Get-Brush, the dialog primitive, the console pane, Show-Banner, fit-to-screen / compact layout, footer links and the unhandled-exception handler.
+  Kept in sync by hand - when changing those parts here, check the copy there too.
+
   Started by START-HERE-GUI.bat (elevated, -STA). Windows PowerShell 5.1, pure ASCII, no BOM.
 
   Test hooks (tests\gui only): -LoadOnly loads the XAML, checks every named control and exits.

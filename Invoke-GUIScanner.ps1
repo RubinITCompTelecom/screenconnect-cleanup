@@ -273,6 +273,7 @@ function Invoke-MalwarebytesOfflineFallback {
             if (Test-Path -LiteralPath $stale) { Remove-Item -LiteralPath $stale -Force -ErrorAction Stop }
         }
         Write-Host ("Downloading Malwarebytes fallback installer: " + $FallbackUrl) -ForegroundColor Cyan
+        try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
         Invoke-WebRequest -Uri $FallbackUrl -OutFile $part -UseBasicParsing -ErrorAction Stop
         $downloaded = Get-Item -LiteralPath $part -ErrorAction Stop
         if ($downloaded.Length -lt $script:MalwarebytesFallbackMinimumBytes -or

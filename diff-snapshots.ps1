@@ -555,7 +555,7 @@ try {
     $before = Read-Snapshot -Path $BeforeFile -Role 'Before'
     $after  = Read-Snapshot -Path $AfterFile  -Role 'After'
 } catch {
-    Write-Error $_.Exception.Message
+    [Console]::Error.WriteLine($_.Exception.Message)
     exit 2
 }
 

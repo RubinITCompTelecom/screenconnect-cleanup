@@ -634,15 +634,28 @@ function Get-LocalAccountsSection {
     } catch {
         Add-CollectionWarning -Section 'LocalAccounts' -WarningText "Administrators group name lookup by SID failed, assuming 'Administrators': $($_.Exception.Message)"
     }
-    $adminGroupPattern = 'Name="' + [regex]::Escape($adminGroupName) + '"'
     try {
         $members = Get-CimInstance -ClassName Win32_GroupUser -ErrorAction Stop | Where-Object {
-            $_.GroupComponent -match $adminGroupPattern
+            $groupName = $null
+            $groupDomain = $null
+            try { $groupName = [string]$_.GroupComponent.Name } catch { }
+            try { $groupDomain = [string]$_.GroupComponent.Domain } catch { }
+            if (-not $groupName) {
+                $groupText = [string]$_.GroupComponent
+                if ($groupText -match '(?i)Name\s*=\s*"([^"]+)"') { $groupName = $Matches[1] }
+                if ($groupText -match '(?i)Domain\s*=\s*"([^"]+)"') { $groupDomain = $Matches[1] }
+            }
+            $localDomains = @('.', $env:COMPUTERNAME)
+            ($groupName -eq $adminGroupName) -and ($localDomains -contains $groupDomain)
         }
         foreach ($m in $members) {
-            if ($m.PartComponent -match 'Name="([^"]+)"') {
-                $adminMembers[$Matches[1]] = $true
+            $partName = $null
+            try { $partName = [string]$m.PartComponent.Name } catch { }
+            if (-not $partName) {
+                $partText = [string]$m.PartComponent
+                if ($partText -match '(?i)Name\s*=\s*"([^"]+)"') { $partName = $Matches[1] }
             }
+            if ($partName) { $adminMembers[$partName] = $true }
         }
     } catch {
         # Fall back to net localgroup parsing if the CIM association query
@@ -826,6 +839,29 @@ function Get-WmiPersistenceSection {
 # ---------------------------------------------------------------------------
 # Recent files (only when IncidentWindowDays > 0)
 # ---------------------------------------------------------------------------
+function Remove-NestedRecentFileRoots {
+    param([string[]]$Roots)
+    $normalizedRoots = New-Object System.Collections.Generic.List[string]
+    foreach ($root in $Roots) {
+        if (-not $root) { continue }
+        $normalized = [string]$root
+        while ($normalized.Length -gt 3 -and ($normalized.EndsWith('\') -or $normalized.EndsWith('/'))) {
+            $normalized = $normalized.Substring(0, $normalized.Length - 1)
+        }
+        if (-not ($normalizedRoots | Where-Object { $_.Equals($normalized, [StringComparison]::OrdinalIgnoreCase) })) { $normalizedRoots.Add($normalized) }
+    }
+    $result = New-Object System.Collections.Generic.List[string]
+    foreach ($candidate in $normalizedRoots) {
+        $nested = $false
+        foreach ($other in $normalizedRoots) {
+            if ($candidate.Length -gt $other.Length -and $candidate.StartsWith($other, [StringComparison]::OrdinalIgnoreCase) -and
+                ($candidate[$other.Length] -eq '\' -or $candidate[$other.Length] -eq '/')) { $nested = $true; break }
+        }
+        if (-not $nested) { $result.Add($candidate) }
+    }
+    return $result.ToArray()
+}
+
 function Get-RecentFilesSection {
     # CapCount bounds the RESULTS only. On a machine with big package/tool
     # caches under %LOCALAPPDATA% / %ProgramData% (node_modules, pip, nuget,
@@ -866,6 +902,12 @@ function Get-RecentFilesSection {
             if ($r -and -not $roots.Contains($r)) { $roots.Add($r) }
         }
     }
+
+    # Remove duplicate and nested roots before walking; Temp often sits under
+    # LocalAppData and would otherwise emit every file twice.
+    $prunedRoots = Remove-NestedRecentFileRoots -Roots $roots.ToArray()
+    $roots = New-Object System.Collections.Generic.List[string]
+    foreach ($root in $prunedRoots) { $roots.Add($root) }
 
     $maxDepth = 6
     $capHit = $false

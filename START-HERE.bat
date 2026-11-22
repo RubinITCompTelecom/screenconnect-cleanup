@@ -469,33 +469,43 @@ set GO=
 set RESET_GPO=
 set RESET_GPO_ARGS=
 powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!collect-snapshot.ps1" -Label after -OutFile "!SCC_RUN_ROOT!\snapshot_after.json" -Quiet
-set "AFTER_RC=!errorlevel!"
-if not "!AFTER_RC!"=="0" (
-    echo     [WARN] After-snapshot exited with errorlevel !AFTER_RC!
-    if "!PIPE_RC!"=="0" set "PIPE_RC=!AFTER_RC!"
+if errorlevel 1 (
+    set "SCC_AFTER_RC=!errorlevel!"
+    echo     [WARN] After-snapshot exited with errorlevel !SCC_AFTER_RC!
+    if "!PIPE_RC!"=="0" set "PIPE_RC=!SCC_AFTER_RC!"
 )
 rem Only diff when the baseline from this run actually exists.
 if not exist "!SCC_RUN_ROOT!\snapshot_before.json" (
     echo     [WARN] No snapshot_before.json - the before snapshot was skipped, so there is
     echo         nothing to diff against. Skipping the diff.
-    if "!PIPE_RC!"=="0" set "PIPE_RC=1"
 ) else (
     if not exist "!SCC_RUN_ROOT!\snapshot_after.json" (
         echo     [WARN] After-snapshot was not written - skipping the diff.
-        if "!PIPE_RC!"=="0" set "PIPE_RC=1"
     ) else (
         set "SCC_DIFF_MANIFEST="
         if exist "!SCC_RUN_ROOT!\removal-manifest.json" set "SCC_DIFF_MANIFEST=-RemovalManifest "!SCC_RUN_ROOT!\removal-manifest.json""
         powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!diff-snapshots.ps1" -BeforeFile "!SCC_RUN_ROOT!\snapshot_before.json" -AfterFile "!SCC_RUN_ROOT!\snapshot_after.json" -OutFile "!SCC_RUN_ROOT!\snapshot_diff.json" !SCC_DIFF_MANIFEST!
-        set "DIFF_RC=!errorlevel!"
-        rem exit 1 from diff = RESURRECTION detected, a finding not a failure
-        if errorlevel 2 (
-            echo     [WARN] Diff failed to run.
-            if "!PIPE_RC!"=="0" set "PIPE_RC=!DIFF_RC!"
-        ) else if errorlevel 1 (
-            echo     [WARN] RESURRECTION DETECTED - removed items came back. See snapshot_diff.json
-        ) else (
+        set "SCC_DIFF_RC=!errorlevel!"
+        rem exit 1 with verdict RESURRECTION is a finding, not a failure (same rule as
+        rem sc-cleanup.ps1): it is reported loudly but does not change PIPE_RC. An
+        rem INCOMPLETE or unreadable diff, or a diff that failed to run, does.
+        if "!SCC_DIFF_RC!"=="0" (
             echo     [i] Diff clean - nothing resurrected.
+        ) else if "!SCC_DIFF_RC!"=="1" (
+            set "SCC_DIFF_VERDICT="
+            if exist "!SCC_RUN_ROOT!\snapshot_diff.json" for /f "delims=" %%V in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $d=Get-Content -LiteralPath (Join-Path $env:SCC_RUN_ROOT 'snapshot_diff.json') -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop; [string]$d.Verdict } catch { 'UNREADABLE' }"') do set "SCC_DIFF_VERDICT=%%V"
+            if /i "!SCC_DIFF_VERDICT!"=="INCOMPLETE" (
+                echo     [WARN] Diff INCOMPLETE - some evidence could not be collected. See snapshot_diff.json
+                if "!PIPE_RC!"=="0" set "PIPE_RC=1"
+            ) else if /i "!SCC_DIFF_VERDICT!"=="RESURRECTION" (
+                echo     [WARN] RESURRECTION DETECTED - removed items came back. See snapshot_diff.json
+            ) else (
+                echo     [WARN] Diff result could not be read after exit 1.
+                if "!PIPE_RC!"=="0" set "PIPE_RC=1"
+            )
+        ) else (
+            echo     [WARN] Diff failed to run.
+            if "!PIPE_RC!"=="0" set "PIPE_RC=!SCC_DIFF_RC!"
         )
     )
 )
@@ -510,7 +520,9 @@ rem A declined/not-run power repair leaves no result file: pass the file only wh
 rem instead of showing "Unknown / incomplete". Scanner status: the Malwarebytes result when there is one, else "skipped"
 rem (the report makes no malware claim either way).
 set "SCC_POWER_ARG="
-if exist "!SCC_RUN_ROOT!/power-options-repair.json" set "SCC_POWER_ARG=-PowerOptionsRepair "!SCC_RUN_ROOT!/power-options-repair.json""
+if exist "!SCC_RUN_ROOT!\power-options-repair.json" set "SCC_POWER_ARG=-PowerOptionsRepair "!SCC_RUN_ROOT!\power-options-repair.json""
+set "SCC_AVU_ARG="
+if exist "!SCC_RUN_ROOT!\logs\av-uninstall-results.json" set "SCC_AVU_ARG=-AVUninstall "!SCC_RUN_ROOT!\logs\av-uninstall-results.json""
 powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Write-ScannerSummary.ps1" -WorkDir "!SCC_RUN_ROOT!" -KvrtState !SCC_KVRT_STATE! -EsetState !SCC_ESET_STATE! -MalwarebytesState !SCC_MB_STATE!
 set "SCC_SCAN_ARG="
 if exist "!SCC_RUN_ROOT!\scanner_results.json" set "SCC_SCAN_ARG=-ScannerSummary "!SCC_RUN_ROOT!\scanner_results.json""
@@ -519,9 +531,9 @@ if not defined FINDINGS_JSON (
 ) else (
     if exist "!FINDINGS_JSON!" (
     if exist "!SCC_RUN_ROOT!/removal-manifest.json" (
-        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!New-InvestigationReport.ps1" -FindingsJson "!FINDINGS_JSON!" !SCC_KEPT_ARG! -RemovalManifest "!SCC_RUN_ROOT!/removal-manifest.json" -PersistenceInventory "!SCC_RUN_ROOT!\persistence\inventory.json" -PersistenceRemoval "!SCC_RUN_ROOT!\persistence\removal.json" -PersistenceResult "!SCC_RUN_ROOT!\persistence\result.json" !SCC_POWER_ARG! !SCC_SCAN_ARG! -DiffPath "!SCC_RUN_ROOT!\snapshot_diff.json" -OutputPath "!SCC_RUN_ROOT!/report.html"
+        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!New-InvestigationReport.ps1" -FindingsJson "!FINDINGS_JSON!" !SCC_KEPT_ARG! -RemovalManifest "!SCC_RUN_ROOT!/removal-manifest.json" -PersistenceInventory "!SCC_RUN_ROOT!\persistence\inventory.json" -PersistenceRemoval "!SCC_RUN_ROOT!\persistence\removal.json" -PersistenceResult "!SCC_RUN_ROOT!\persistence\result.json" !SCC_POWER_ARG! !SCC_SCAN_ARG! -DiffPath "!SCC_RUN_ROOT!\snapshot_diff.json" !SCC_AVU_ARG! -OutputPath "!SCC_RUN_ROOT!/report.html"
     ) else (
-        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!New-InvestigationReport.ps1" -FindingsJson "!FINDINGS_JSON!" !SCC_KEPT_ARG! -PersistenceInventory "!SCC_RUN_ROOT!\persistence\inventory.json" -PersistenceRemoval "!SCC_RUN_ROOT!\persistence\removal.json" -PersistenceResult "!SCC_RUN_ROOT!\persistence\result.json" !SCC_POWER_ARG! !SCC_SCAN_ARG! -DiffPath "!SCC_RUN_ROOT!\snapshot_diff.json" -OutputPath "!SCC_RUN_ROOT!/report.html"
+        powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!New-InvestigationReport.ps1" -FindingsJson "!FINDINGS_JSON!" !SCC_KEPT_ARG! -PersistenceInventory "!SCC_RUN_ROOT!\persistence\inventory.json" -PersistenceRemoval "!SCC_RUN_ROOT!\persistence\removal.json" -PersistenceResult "!SCC_RUN_ROOT!\persistence\result.json" !SCC_POWER_ARG! !SCC_SCAN_ARG! -DiffPath "!SCC_RUN_ROOT!\snapshot_diff.json" !SCC_AVU_ARG! -OutputPath "!SCC_RUN_ROOT!/report.html"
     )
         set "REPORT_RC=!errorlevel!"
         set "REPORT_OPENED=0"
@@ -546,9 +558,9 @@ if not defined FINDINGS_JSON (
             )
             rem Upload/annotation finishes before opening or copying the report.
             rem Owner directive 2026-08-27: open the report folder + report.
-            explorer /select,"!SCC_RUN_ROOT!/report.html"
-            start "" "!SCC_RUN_ROOT!/report.html"
-            if not errorlevel 1 set "REPORT_OPENED=1"
+            explorer /select,"!SCC_RUN_ROOT!\report.html"
+            start "" "!SCC_RUN_ROOT!\report.html"
+            set "REPORT_OPENED=1"
             rem Owner directive 2026-09-06: also leave a copy of report.html on
             rem the current user's Desktop. The run-root original is preserved;
             rem a failed copy is reported visibly (never silent) and marks the
@@ -723,8 +735,10 @@ if exist "!SCC_RUN_ROOT!\power-options-repair.json" set "SCC_POWER_ARG=-PowerOpt
 powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!Write-ScannerSummary.ps1" -WorkDir "!SCC_SCAN_ROOT!" -KvrtState !SCC_KVRT_STATE! -EsetState !SCC_ESET_STATE! -MalwarebytesState !SCC_MB_STATE!
 set "SCC_SCAN_ARG="
 if exist "!SCC_SCAN_ROOT!\scanner_results.json" set "SCC_SCAN_ARG=-ScannerSummary "!SCC_SCAN_ROOT!\scanner_results.json""
+set "SCC_AVU_ARG="
+if exist "!SCC_RUN_ROOT!\logs\av-uninstall-results.json" set "SCC_AVU_ARG=-AVUninstall "!SCC_RUN_ROOT!\logs\av-uninstall-results.json""
 echo     [i] Building the report again with the persistence check from after the scans.
-powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!New-InvestigationReport.ps1" -FindingsJson "!FINDINGS_JSON!" !SCC_OR_ARGS! -PersistenceInventory "!SCC_AS!\inventory.json" -PersistenceRemoval "!SCC_AS!\removal.json" -PersistenceResult "!SCC_AS!\result.json" !SCC_POWER_ARG! !SCC_SCAN_ARG! -DiffPath "!SCC_RUN_ROOT!\snapshot_diff.json" -OutputPath "!SCC_ONLINE_REPORT!"
+powershell -NoProfile -ExecutionPolicy Bypass -File "!SCC_DP0!New-InvestigationReport.ps1" -FindingsJson "!FINDINGS_JSON!" !SCC_OR_ARGS! -PersistenceInventory "!SCC_AS!\inventory.json" -PersistenceRemoval "!SCC_AS!\removal.json" -PersistenceResult "!SCC_AS!\result.json" !SCC_POWER_ARG! !SCC_SCAN_ARG! -DiffPath "!SCC_RUN_ROOT!\snapshot_diff.json" !SCC_AVU_ARG! -OutputPath "!SCC_ONLINE_REPORT!"
 if errorlevel 1 goto :online_report_failed
 if exist "!SCC_ONLINE_REPORT!" (
     set "SCC_SHARE_REPORT=!SCC_ONLINE_REPORT!"

@@ -14,9 +14,9 @@
       "Id": "1", "Title": "Tool pack and scanner staging", "Group": "Tools",
       "Phases": ["ALL", "ONLINE", "STAGE"],
       "Calls": [
-        { "Script": "tools\\Get-ToolPack.ps1", "Args": ["-Quiet"], "OnMissing": "WarnSkip", "OnNonZero": "Ignore" },
-        { "Script": "tools\\Get-ToolPack.ps1", "Args": ["-Verify"], "OnMissing": "WarnSkip", "OnNonZero": "Ignore" },
-        { "Script": "tools\\Get-AVTools.ps1", "Args": ["-ToolDir", "{ToolRoot}tools\\AV"], "OnMissing": "WarnSkip", "OnNonZero": "Ignore" }
+        { "Script": "tools\\Get-ToolPack.ps1", "Args": ["-Quiet"], "OnMissing": "WarnSkip", "OnNonZero": "Warn", "NonZeroText": "Tool pack download failed." },
+        { "Script": "tools\\Get-ToolPack.ps1", "Args": ["-Verify"], "OnMissing": "WarnSkip", "OnNonZero": "Warn", "NonZeroText": "Tool pack verification failed." },
+        { "Script": "tools\\Get-AVTools.ps1", "Args": ["-ToolDir", "{ToolRoot}tools\\AV"], "OnMissing": "WarnSkip", "OnNonZero": "Warn", "NonZeroText": "One or more scanner downloads failed." }
       ]
     },
     {
@@ -128,7 +128,7 @@
       "Phases": ["ALL", "OFFLINE"],
       "Calls": [
         { "Script": "collect-snapshot.ps1", "Args": ["-Label", "after", "-OutFile", "{RunRoot}\\snapshot_after.json", "-Quiet"],
-          "OnNonZero": "Warn", "NonZeroText": "After-snapshot failed." }
+          "OnNonZero": "WarnPipe", "NonZeroText": "After-snapshot failed." }
       ]
     },
     {
@@ -152,8 +152,8 @@
                    "-PersistenceInventory", "{RunRoot}\\persistence\\inventory.json",
                    "-PersistenceRemoval", "{RunRoot}\\persistence\\removal.json",
                    "-PersistenceResult", "{RunRoot}\\persistence\\result.json",
-                   "{@PowerArg}", "{@ScannerArgs}",
-                   "-DiffPath", "{RunRoot}\\snapshot_diff.json", "-OutputPath", "{RunRoot}/report.html"],
+                   "{@PowerArg}", "{@ScannerArgs}", "{@ReportEvidenceArgs}",
+                   "-OutputPath", "{RunRoot}/report.html"],
           "When": ["Has:FindingsJson", "Exists:{FindingsJson}"], "SkipText": "No current-run findings.json available - the report is skipped.",
           "After": "MarkReport", "OnNonZero": "WarnPipe", "NonZeroText": "Report generation failed." }
       ]
@@ -190,8 +190,8 @@
                    "-PersistenceInventory", "{PersistWorkDir}\\persistence\\inventory.json",
                    "-PersistenceRemoval", "{PersistWorkDir}\\persistence\\removal.json",
                    "-PersistenceResult", "{PersistWorkDir}\\persistence\\result.json",
-                   "{@PowerArgBs}", "{@ScannerArgs}",
-                   "-DiffPath", "{RunRoot}\\snapshot_diff.json", "-OutputPath", "{OnlineReport}"],
+                   "{@PowerArgBs}", "{@ScannerArgs}", "{@ReportEvidenceArgs}",
+                   "-OutputPath", "{OnlineReport}"],
           "When": ["Not:ScannerOnly", "Has:FindingsJson"],
           "SkipText": "No Offline findings for a combined report; nothing will be shared.",
           "OnMissing": "WarnPipeSkip", "OnNonZero": "WarnPipe", "After": "MarkAfterScansReport" }

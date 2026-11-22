@@ -37,7 +37,7 @@ if($file -like '*collect-snapshot.ps1'){
 }
 if($file -like '*diff-snapshots.ps1'){
     $i=[array]::IndexOf($cli,'-OutFile')
-    [IO.File]::WriteAllText($cli[$i+1],'{"Verdict":"INCOMPLETE"}')
+    [IO.File]::WriteAllText($cli[$i+1],('{"Verdict":"'+$env:SCC_FIXTURE_DIFF_VERDICT+'"}'))
     exit ([int]$env:SCC_FIXTURE_DIFF_RC)
 }
 throw ('Fixture refused unexpected child: '+$file)
@@ -47,16 +47,18 @@ throw ('Fixture refused unexpected child: '+$file)
         [IO.File]::WriteAllText((Join-Path $stub 'powershell.cmd'),('@echo off'+"`r`n"+'"'+$realHost+'" -NoProfile -ExecutionPolicy Bypass -File "%~dp0stub.ps1" %*'+"`r`n"+'exit /b %errorlevel%'+"`r`n"),[Text.Encoding]::ASCII)
         # A batch stub must be called explicitly to return to the real stage.
         # Substitute only the child launcher seam; preserve stage logic/arguments.
-        $region=$region.Replace('powershell -NoProfile', ('call "'+(Join-Path $stub 'powershell.cmd')+'" -NoProfile'))
+        $region=$region.Replace('powershell -NoProfile -ExecutionPolicy Bypass -File', ('call "'+(Join-Path $stub 'powershell.cmd')+'" -NoProfile -ExecutionPolicy Bypass -File'))
+        # The verdict read uses -Command; point it at the real host so the stub on PATH is not used for it.
+        $region=$region.Replace('powershell -NoProfile -ExecutionPolicy Bypass -Command', ($realHost+' -NoProfile -ExecutionPolicy Bypass -Command'))
         $batch=Join-Path $temp 'step8.bat'
-        foreach($scenario in @(@{Collect=4;Diff=0;Fail=$true},@{Collect=0;Diff=2;Fail=$true},@{Collect=0;Diff=1;Fail=$false},@{Collect=0;Diff=0;Fail=$false})) {
+        foreach($scenario in @(@{Collect=4;Diff=0;Verdict='CLEAN';Fail=$true},@{Collect=0;Diff=2;Verdict='INCOMPLETE';Fail=$true},@{Collect=0;Diff=1;Verdict='RESURRECTION';Fail=$false},@{Collect=0;Diff=1;Verdict='INCOMPLETE';Fail=$true},@{Collect=0;Diff=0;Verdict='CLEAN';Fail=$false})) {
             $run=Join-Path $temp ([guid]::NewGuid().ToString('N'));$null=New-Item -ItemType Directory -Path $run
             [IO.File]::WriteAllText((Join-Path $run 'snapshot_before.json'),'{}')
             $preamble='@echo off'+"`r`n"+'setlocal EnableDelayedExpansion'+"`r`n"+'set "SCC_DP0='+$repo+'\"'+"`r`n"+'set "SCC_RUN_ROOT='+$run+'"'+"`r`n"+'set "PIPE_RC=0"'+"`r`n"
             [IO.File]::WriteAllText($batch,($preamble+$region+"`r`nexit /b !PIPE_RC!`r`n"),[Text.Encoding]::ASCII)
             $psi=New-Object Diagnostics.ProcessStartInfo;$psi.FileName=$env:ComSpec;$psi.Arguments='/d /c ""'+$batch+'""';$psi.UseShellExecute=$false;$psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true
             $psi.EnvironmentVariables['PATH']=$stub+';'+$env:PATH
-            $psi.EnvironmentVariables['SCC_FIXTURE_COLLECT_RC']=[string]$scenario.Collect;$psi.EnvironmentVariables['SCC_FIXTURE_DIFF_RC']=[string]$scenario.Diff
+            $psi.EnvironmentVariables['SCC_FIXTURE_COLLECT_RC']=[string]$scenario.Collect;$psi.EnvironmentVariables['SCC_FIXTURE_DIFF_RC']=[string]$scenario.Diff;$psi.EnvironmentVariables['SCC_FIXTURE_DIFF_VERDICT']=[string]$scenario.Verdict
             $p=New-Object Diagnostics.Process;$p.StartInfo=$psi
             try {
                 if(-not $p.Start()){throw 'Batch fixture did not start.'}
@@ -65,7 +67,7 @@ throw ('Fixture refused unexpected child: '+$file)
                 if(($p.ExitCode -ne 0) -ne $scenario.Fail){throw ('Step 8 exit mismatch: collect='+$scenario.Collect+' diff='+$scenario.Diff+' exit='+$p.ExitCode+' '+$stdout.Result+' '+$stderr.Result)}
             } finally {$p.Dispose()}
         }
-        Write-Host 'PASS: real Step 8 batch preserves collection/diff failure exits; resurrection remains a finding.'
+        Write-Host 'PASS: real Step 8 batch preserves collection/diff failure exits; resurrection remains a finding; an incomplete diff fails.'
     } else {Write-Host 'SKIP: batch execution requires Windows; both actual report argument lists were replayed.'}
     Write-Host 'PASS: both guided report branches include current-run comparison failure evidence.'
 } finally {Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue}

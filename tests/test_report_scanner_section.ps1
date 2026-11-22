@@ -111,7 +111,7 @@ Check 'report1 hostile scanner escaped' ($html1.Contains('&lt;script&gt;alert(1)
 Check 'report1 surfaces suspected download filter interference' ($html1.Contains('possible web-filter/proxy interference') -and $html1.Contains('scanner-Malwarebytes-result.json'))
 Check 'report1 names suspected filter evidence' ($html1.Contains('Named filter evidence: Techloq'))
 # Findings column: KVRT shows Not parseable
-Check 'report1 KVRT findings shows Not parseable' ($html1.Contains('Not parseable'))
+Check 'report1 KVRT findings shows results unavailable' ($html1.Contains('Results not available'))
 Check 'report1 KVRT findings mentions encrypted' ($html1.Contains('KVRT reports are encrypted (.enc1) or missing'))
 Check 'report1 KVRT findings tells technician to re-run with -dontencrypt' ($html1.Contains('dontencrypt') -and $html1.Contains('KVRT_Data\Reports'))
 # Findings column: ESET shows threat count

@@ -1,6 +1,7 @@
 Set-StrictMode -Version 2
 $script:InventoryMaxFiles = 2500
 $script:InventoryMaxSeconds = 30
+$script:InventoryMaxCollectionSeconds = 270
 $script:InventoryMaxHashBytes = 20MB
 $script:RegistryRoots = @(
     'Registry::HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Run',
@@ -107,7 +108,7 @@ function Get-SccProfileRoots {
     try {
         if(Test-Path -LiteralPath $profileList) {
             foreach($key in @(Get-ChildItem -LiteralPath $profileList -ErrorAction Stop)) {
-                if($key.PSChildName -notmatch '^S-1-5-21-'){continue}
+                if($key.PSChildName -notmatch '^S-1-(?:5-21|12-1)-[0-9]+-[0-9]+-[0-9]+-[0-9]+$'){continue}
                 $profilePath=[Environment]::ExpandEnvironmentVariables([string](Get-ItemProperty -LiteralPath $key.PSPath -Name ProfileImagePath -ErrorAction Stop).ProfileImagePath)
                 if(-not $profilePath){[void]$gaps.Add("Profile $($key.PSChildName): missing ProfileImagePath");continue}
                 $sid=[string]$key.PSChildName
@@ -433,7 +434,7 @@ function Get-SccPersistenceInventory {
     $sections.ScriptFiles=New-SccSection -Status $(if($scripts.Truncated -or $scripts.Errors.Count){'Incomplete'}else{'Complete'}) -Items $scripts.Items -Errors $scripts.Errors -Limits $scripts.Limits
     foreach($e in $scripts.Errors){[void]$errors.Add($e)};if($scripts.Truncated){[void]$errors.Add('ScriptFiles: bounded file/time cap reached; scan truncated')}
     $sections.PrivacyOmissions=New-SccSection -Items @('No raw script samples collected.','PowerShell shell/history content omitted for privacy.','Offline user registry hives are not mounted; unloaded profiles are explicit coverage gaps.')
-    if($started.Elapsed.TotalSeconds -ge $script:InventoryMaxSeconds){[void]$errors.Add('Overall collection exceeded configured time budget; later sections may be partial')}
+    if($started.Elapsed.TotalSeconds -ge $script:InventoryMaxCollectionSeconds){[void]$errors.Add('Overall collection exceeded configured time budget; later sections may be partial')}
     $status=if($errors.Count){'Incomplete'}else{'Complete'}
     $runId=Split-Path (Split-Path $OutDir -Parent) -Leaf
     $result=[pscustomobject]@{SchemaVersion=1;RunId=$runId;ComputerName=$env:COMPUTERNAME;GeneratedUtc=[DateTime]::UtcNow.ToString('o');Status=$status;Errors=@($errors.ToArray());Sections=[pscustomobject]$sections;Findings=@($findings.ToArray());Counts=[pscustomobject]@{Findings=$findings.Count;ScriptFiles=$scripts.Items.Count}}

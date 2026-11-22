@@ -546,7 +546,9 @@ function Get-ServiceInstallEvents {
             }
         })
     } catch {
-        $script:EventLogError = $_.Exception.Message
+        if ($_.FullyQualifiedErrorId -notmatch '(^|,)NoMatchingEventsFound(,|$)') {
+            $script:EventLogError = $_.Exception.Message
+        }
         return @()
     }
 }
@@ -655,8 +657,10 @@ function Invoke-ScreenConnectModule {
             $slot  = Get-Slot $key
             if ($slot.Sources -notcontains "directory") { [void]$slot.Sources.Add("directory") }
             if (-not $slot.Identifier) { $slot.Identifier = $ident }
-            if (-not $slot.InstallDir) { $slot.InstallDir = $dir.FullName }
-            $slot.InstallDirCreatedUtc = $dir.CreationTimeUtc.ToString("yyyy-MM-dd HH:mm:ss")
+            if (-not $slot.InstallDir) {
+                $slot.InstallDir = $dir.FullName
+                $slot.InstallDirCreatedUtc = $dir.CreationTimeUtc.ToString("yyyy-MM-dd HH:mm:ss")
+            }
         }
     }
 
@@ -1041,7 +1045,7 @@ try {
     $services  = Get-AllServices;        Write-Log ("  services:           {0}" -f $services.Count)
     $processes = Get-AllProcesses;       Write-Log ("  processes:          {0}" -f $processes.Count)
     $uninstall = Get-AllUninstallEntries;Write-Log ("  installed programs: {0}" -f $uninstall.Count)
-    $events    = Get-ServiceInstallEvents
+    $events    = @(Get-ServiceInstallEvents)
     if ($script:EventLogError) {
         Write-Log ("  service-install events: UNAVAILABLE ({0})" -f $script:EventLogError) "Yellow"
     } else {

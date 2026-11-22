@@ -281,7 +281,12 @@ try {
     # diff exit 1 is a finding, not a failure
     $hg = New-Harness 'gui-diff1' ''
     $stubPath = Get-ChildItem -Path $hg.Dir -Filter 'diff-snapshots.ps1' -Recurse -File | Select-Object -First 1
-    Set-Content -LiteralPath $stubPath.FullName -Value ($stubText.Replace('exit 0', 'exit 1')) -Encoding ASCII
+    $diffStub = @'
+$out = $args[([array]::IndexOf($args, '-OutFile') + 1)]
+Set-Content -LiteralPath $out -Value '{"Verdict":"RESURRECTION"}' -Encoding ASCII
+exit 1
+'@
+    Set-Content -LiteralPath $stubPath.FullName -Value $diffStub -Encoding ASCII
     $s = New-GuiSession -Mode Offline -ToolRoot $hg.Dir -RitRoot $hg.Rit
     [void](Initialize-GuiRunRoot -Session $s)
     $g = Invoke-GuiHeadless $s $desktop 'gui-diff1'

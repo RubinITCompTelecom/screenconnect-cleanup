@@ -41,7 +41,7 @@ Check 'guided launcher passes the report path to the uploader' $startSource.Cont
 Check 'cleanup runner passes the report path to the uploader' $cleanupSource.Contains('-ReportHtml') $cleanupSource
 $guidedUpload = $startSource.IndexOf(' -ReportHtml ')
 $guidedCopy = $startSource.IndexOf('Copy-Item -LiteralPath')
-$guidedOpen = $startSource.IndexOf('start "" "!SCC_RUN_ROOT!/report.html"')
+$guidedOpen = $startSource.IndexOf('start "" "!SCC_RUN_ROOT!\report.html"')
 Check 'guided report is copied after the upload finishes' ($guidedUpload -ge 0 -and $guidedCopy -gt $guidedUpload) 'Report copy must follow the uploader invocation'
 Check 'guided report opens after the upload finishes' ($guidedUpload -ge 0 -and $guidedOpen -gt $guidedUpload) 'Browser must open the final annotated report'
 $directUpload = $cleanupSource.IndexOf('Invoke-ChildScript -ScriptPath $uploadScript')
@@ -443,9 +443,9 @@ try {
         $stage = $stage.Replace('!SCC_DP0!', ($guidedDir.TrimEnd('\') + '\'))
         if ($stage -match '!SCC_(F0|ARG1|ARGS)!') { throw 'Guided stage uses a captured token this fixture does not resolve.' }
         $stage = $stage.Replace("[Environment]::GetFolderPath('Desktop')", '$env:SCC_TEST_DESKTOP')
-        $stage = $stage.Replace('explorer /select,"!SCC_RUN_ROOT!/report.html"', 'rem Explorer suppressed in fixture')
+        $stage = $stage.Replace('explorer /select,"!SCC_RUN_ROOT!\report.html"', 'rem Explorer suppressed in fixture')
         $openProbe = 'powershell -NoProfile -Command "if (-not ([IO.File]::ReadAllText($env:SCC_RUN_ROOT + ''/report.html'').Contains(''Sanitized paste (MicroBin)''))) { exit 9 }; [IO.File]::WriteAllText($env:SCC_RUN_ROOT + ''/opened.marker'', ''ok'')"'
-        $stage = $stage.Replace('start "" "!SCC_RUN_ROOT!/report.html"', $openProbe)
+        $stage = $stage.Replace('start "" "!SCC_RUN_ROOT!\report.html"', $openProbe)
         $stage = $stage.Replace('-ReportHtml "!SCC_RUN_ROOT!/report.html"', '-ReportHtml "!SCC_RUN_ROOT!/report.html" -AllowInsecureRelay')
         $bat = Join-Path $guidedDir 'report-stage.bat'
         [System.IO.File]::WriteAllText($bat, ("@echo off`r`nsetlocal EnableDelayedExpansion`r`nset PIPE_RC=0`r`n" + $stage + "`r`nexit /b !PIPE_RC!`r`n"), [System.Text.Encoding]::ASCII)

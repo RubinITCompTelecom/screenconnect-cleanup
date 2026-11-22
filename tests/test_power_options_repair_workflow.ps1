@@ -16,7 +16,7 @@ function Check {
 
 $startRepair = $startHere.IndexOf('Repair missing power options now? [y/N]')
 $startAfterSnapshot = $startHere.IndexOf('-Label after')
-$startReportOpen = $startHere.IndexOf('start "" "!SCC_RUN_ROOT!/report.html"')
+$startReportOpen = $startHere.IndexOf('start "" "!SCC_RUN_ROOT!\report.html"')
 $startRebootPrompt = $startHere.IndexOf('Restart now through CMD? [y/N]')
 $startRebootCommand = $startHere.IndexOf('cmd.exe /d /c "shutdown /r /t 0 /f"')
 Check 'guided runner repairs before its after snapshot' ($startRepair -ge 0 -and $startAfterSnapshot -gt $startRepair)

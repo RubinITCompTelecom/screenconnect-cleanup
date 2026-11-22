@@ -37,8 +37,24 @@ param(
     [string]$Scanner,
     [string]$EsetLogPath,
     [string]$MbamReportPath,
-    [string]$KvrtReportPath
+    [string]$KvrtReportPath,
+    [string]$SessionStartTimeUtc
 )
+
+# Session binding: when the caller supplies the scanner session start (UTC),
+# a report file last written before it cannot belong to this session. The
+# start text is parsed culture-independently and treated as UTC whether or
+# not it carries a Z/offset. An unreadable start time fails closed.
+function Test-ReportFromSession {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($SessionStartTimeUtc)) { return $true }
+    $dto = [DateTimeOffset]::MinValue
+    $styles = [Globalization.DateTimeStyles]::AssumeUniversal
+    if (-not [DateTimeOffset]::TryParse($SessionStartTimeUtc, [Globalization.CultureInfo]::InvariantCulture, $styles, [ref]$dto)) { return $false }
+    try {
+        return ((Get-Item -LiteralPath $Path -ErrorAction Stop).LastWriteTimeUtc -ge $dto.UtcDateTime)
+    } catch { return $false }
+}
 
 function Get-PropVal {
     param($Obj, [string]$Name, $Default = $null)
@@ -99,12 +115,18 @@ if ($Scanner -eq 'KVRT') {
         $reportFile = ($reportFiles | Sort-Object LastWriteTime -Descending | Select-Object -First 1)
     }
 
+    if (-not (Test-ReportFromSession -Path $reportFile.FullName)) {
+        $result.NotParseable = $true
+        $result.Error = 'No report from this scan session was found.'
+        return $result
+    }
     $result.LogPath = $reportFile.FullName
     $result.ScanDate = $reportFile.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')
 
     try {
         $lines = @(Get-Content -LiteralPath $reportFile.FullName -ErrorAction Stop)
     } catch {
+        $result.NotParseable = $true
         $result.Error = 'Could not read KVRT report: ' + $_.Exception.Message
         return $result
     }
@@ -132,7 +154,7 @@ if ($Scanner -eq 'KVRT') {
         if (-not ($verdict -or $isDetectionLine)) { continue }
 
         $object = ''
-        if ($line -match '([A-Za-z]:\\[^ \t,;<>]+)') { $object = $Matches[1] }
+        if ($line -match '([A-Za-z]:\\.+?)(?=\s+(?:detected:|infected:|dangerous:|malicious:|suspicious:|HEUR:|UDS:|PDM:|not-a-virus:|not-virus:)|[,;<>]|$)') { $object = $Matches[1] }
 
         if (-not $verdict -and -not $object) { continue }
 
@@ -185,6 +207,7 @@ if ($Scanner -eq 'ESET') {
     }
 
     if (-not (Test-Path -LiteralPath $logPath)) {
+        $result.NotParseable = $true
         $result.Error = 'ESET log not found at ' + $logPath
         return $result
     }
@@ -194,11 +217,13 @@ if ($Scanner -eq 'ESET') {
         # encoding. Get-Content -Encoding Unicode reads it correctly.
         $allLines = @(Get-Content -LiteralPath $logPath -Encoding Unicode -ErrorAction Stop)
     } catch {
+        $result.NotParseable = $true
         $result.Error = 'Could not read ESET log: ' + $_.Exception.Message
         return $result
     }
 
     if ($allLines.Count -eq 0) {
+        $result.NotParseable = $true
         $result.Error = 'ESET log is empty'
         return $result
     }
@@ -214,11 +239,17 @@ if ($Scanner -eq 'ESET') {
         }
     }
     if ($lastScanStart -lt 0) {
+        $result.NotParseable = $true
         $result.Error = 'Could not locate a scan block in the ESET log'
         return $result
     }
 
     $scanBlock = $allLines[$lastScanStart..($allLines.Count - 1)]
+    if (-not (Test-ReportFromSession -Path $logPath)) {
+        $result.NotParseable = $true
+        $result.Error = 'No report from this scan session was found.'
+        return $result
+    }
 
     # Parse key=value lines from the last scan block. Threats appear under
     # the "detected" section with "name=" entries; we also collect
@@ -350,13 +381,20 @@ if ($Scanner -eq 'Malwarebytes') {
     }
 
     if (-not $reportPath -or -not (Test-Path -LiteralPath $reportPath)) {
+        $result.NotParseable = $true
         $result.Error = 'Malwarebytes scan report not found'
         return $result
     }
 
+    if (-not (Test-ReportFromSession -Path $reportPath)) {
+        $result.NotParseable = $true
+        $result.Error = 'No report from this scan session was found.'
+        return $result
+    }
     try {
         [xml]$xml = Get-Content -LiteralPath $reportPath -Raw -ErrorAction Stop
     } catch {
+        $result.NotParseable = $true
         $result.Error = 'Could not parse Malwarebytes report: ' + $_.Exception.Message
         return $result
     }

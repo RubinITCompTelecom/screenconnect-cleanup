@@ -1,7 +1,7 @@
 # ScreenConnect Cleanup
 
-**BETA: 1.8.13-beta.1.** Download the [Latest beta release](https://github.com/pupontech/screenconnect-cleanup/releases/tag/v1.8.13-beta.1).
-Includes the reviewed cleanup repairs, persistence selection checkboxes, staged KVRT in Offline mode,
+**BETA: 1.8.13-beta.2.** Download the [Latest beta release](https://github.com/pupontech/screenconnect-cleanup/releases/tag/v1.8.13-beta.2).
+Includes the end-to-end review fixes, the reviewed cleanup repairs, persistence selection checkboxes, staged KVRT in Offline mode,
 clear Online continuation choices and preserved Online attempts. Live elevated Windows acceptance
 is still required. Existing releases remain available; the installer command below downloads GitHub's Latest release.
 

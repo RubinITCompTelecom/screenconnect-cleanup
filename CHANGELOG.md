@@ -3,6 +3,16 @@
 Semantic versions. The deploy zip is named `screenconnect-cleanup-v<VER>.zip`
 and carries a `VERSION` file so each build is self-identifying.
 
+## [1.8.13-beta.2] - 2026-11-22 - End-to-end review fixes (DRAFT, not yet published)
+**Draft build for owner testing.** 1.8.13-beta.1 stays the Latest download. Checked with the offline test set only; live elevated Windows acceptance remains outstanding.
+- Removal: the uninstall-entry lookup no longer loses its results, a resume run keeps the first run's manifest entries, a finished resume removes its scheduled task, and a failed entry without an exit code no longer shows 0.
+- Snapshots, diff and detector: the local-administrator flag is correct, the diff exits 2 on unusable input, Temp is walked once, and service-install events and the install folder date are handled correctly.
+- Scanners and report: a missing or unreadable scanner log is reported as "Results not available", never as clean. KVRT paths with spaces stay distinct. Reports older than the scanner session are refused. TLS 1.2 is enabled before downloads.
+- Persistence and power repair: both local policy folders are reset, Entra ID profiles are scanned, and the inventory has a 270 second overall budget.
+- Launcher and GUI: an INCOMPLETE diff fails the run and is no longer announced as resurrection (RESURRECTION remains a finding). After-snapshot and diff failures reach the exit code. The report receives the diff and AV-uninstall sections. Stage tools names missing tools.
+- Relay: the export honours `--since-unix`.
+- Seven regression test files added; they are not yet wired into the hosted Windows CI workflow.
+
 ## [1.8.13-beta.1] - 2026-11-17 - Latest beta release
 - Promotes the GUI Alpha 10 code, whose hosted Windows CI passed, to the Latest beta download. Runtime code is unchanged by this version promotion.
 - Includes persistence candidate checkboxes, staged Offline KVRT (ESET and Malwarebytes installation remain Online-only), explicit Online continuation/cancellation choices, fresh Online attempt folders and current-report sharing guards.

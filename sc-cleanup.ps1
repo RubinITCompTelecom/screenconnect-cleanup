@@ -67,7 +67,7 @@ if (($ResetLocalGpo -or $AllowManagedDevice) -and -not $RepairPowerOptions) {
 # -----------------------------------------------------------------------------
 # Constants & script metadata
 # -----------------------------------------------------------------------------
-$ScriptVersion = '1.8.13-beta.1'
+$ScriptVersion = '1.8.13-beta.2'
 $ScriptName = 'sc-cleanup.ps1'
 $PipelineStages = @(
     @{ Id = 0; Name = 'Preflight';            SkipFlag = '' },

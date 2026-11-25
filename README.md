@@ -59,9 +59,35 @@ matters: a host you do not recognise is the scammer's.
 
 ![Finished run: one card per ScreenConnect instance, relay host first](docs/images/gui-results.png)
 
+### First: is ScreenConnect in the tray?
+
+Before you plug anything into the PC, look at the notification area next to the clock (click **^** to
+see the hidden icons). The ScreenConnect client shows a teal icon of two overlapping windows; hover it
+and the tooltip reads *ScreenConnect Client*. While someone is connected you may also see a
+"Connected" notification and a banner at the top of the screen saying *Your computer is being
+controlled by ...*.
+
+![ScreenConnect client icon in the Windows tray (teal, two overlapping windows)](docs/images/screenconnect-tray-icon.png)
+
+![ScreenConnect Client "Connected" notification above the tray icon](docs/images/screenconnect-connected-notification.png)
+
+![Banner shown on the PC during a session: "Your computer is being controlled by ..."](docs/images/screenconnect-banner.png)
+
+<sub>Screenshots: ScreenConnect's own blog, [ScreenConnect Customizations: What's Different and Why](https://www.screenconnect.com/blog/customization-update) (August 2025). Older versions and custom-branded copies can look different; scammers have also been seen renaming the icon to look like Defender or another app, so no icon does not prove it is clean.</sub>
+
+**If you see it, assume the scammer can still get in, and:**
+
+1. **Stage on a separate, clean computer**, not on this PC: run **Stage tools** (or
+   `START-HERE.bat --stage`) on your own PC, then copy the whole folder to a USB stick. Do not go online
+   on the infected PC to download anything.
+2. **Take the infected PC off the network** (unplug the cable, turn Wi-Fi off) before you plug the stick in.
+3. **Run Offline first.** Only reconnect and run **Online** once the Offline run has removed
+   ScreenConnect.
+
 ### The usual job
 
 1. **Take the PC off the network** (unplug the cable, turn Wi-Fi off) if a session might still be live.
+   If ScreenConnect is in the tray, stage the tools on a separate computer first (see above).
 2. Run **Offline**. For each ScreenConnect instance choose **Remove** (the default) or **Keep** (for
    example the customer's own support agent). Type `REMOVE` to confirm; the button stays disabled
    until you do.

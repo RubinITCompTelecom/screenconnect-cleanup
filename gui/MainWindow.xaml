@@ -350,6 +350,8 @@
             <TextBlock Style="{StaticResource Text.Heading}" FontSize="18" Text="Which part do you want to run?"/>
             <TextBlock Style="{StaticResource Text.Muted}" Margin="0,6,0,14"
                        Text="This window runs the same steps as START-HERE.bat, one at a time, and asks you the same questions. Removal always needs your own confirmation."/>
+            <TextBlock Style="{StaticResource Text.Muted}" Margin="0,-6,0,14" TextWrapping="Wrap"
+                       Text="ScreenConnect icon in the tray (teal, two overlapping windows, tooltip 'ScreenConnect Client')? Someone may still be connected. Stage the tools on a separate, clean computer, take this PC off the network, and run Offline first. Go online here only after Offline has removed it."/>
 
             <RadioButton x:Name="RbOffline" GroupName="Mode" IsChecked="True" Style="{StaticResource ModeCard}">
               <StackPanel>
@@ -383,7 +385,7 @@
               <StackPanel>
                 <TextBlock FontSize="14" FontWeight="SemiBold" Text="Stage tools only - download for later (needs internet)"/>
                 <TextBlock Style="{StaticResource Text.Muted}" Margin="0,3,0,0"
-                           Text="Downloads the tool pack and the scanners into this folder, so the offline half can run on a PC with no connection. No run folder is created."/>
+                           Text="Downloads the tool pack and the scanners into this folder, so the offline half can run on a PC with no connection. Best done on a separate, clean computer, then copy the folder over. No run folder is created."/>
               </StackPanel>
             </RadioButton>
 

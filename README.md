@@ -2,11 +2,6 @@
 
 > Designed by [pupontech](https://github.com/pupontech) in collaboration with Rubin IT. A read-only mirror of this repository is kept at [RubinITCompTelecom/screenconnect-cleanup](https://github.com/RubinITCompTelecom/screenconnect-cleanup). Make changes in [pupontech/screenconnect-cleanup](https://github.com/pupontech/screenconnect-cleanup).
 
-**BETA: 1.8.13-beta.2.** Download the [Latest beta release](https://github.com/pupontech/screenconnect-cleanup/releases/tag/v1.8.13-beta.2).
-Includes the end-to-end review fixes, the reviewed cleanup repairs, persistence selection checkboxes, staged KVRT in Offline mode,
-clear Online continuation choices and preserved Online attempts. Live elevated Windows acceptance
-is still required. Existing releases remain available; the installer command below downloads GitHub's Latest release.
-
 > **Microsoft Defender may flag this tool. It is a false positive.** The tool does what malware
 > removers do: it finds and removes a remote-access program, moves files to quarantine, runs
 > PowerShell scripts, and downloads antivirus scanners. Defender's behaviour checks can mistake that
@@ -20,6 +15,11 @@ is still required. Existing releases remain available; the installer command bel
 > **Windows Security > Virus & threat protection > Protection history**, pick the item and choose
 > **Allow on device** (or **Restore**). Do not turn Defender off. Please also report the false positive to
 > Microsoft at <https://www.microsoft.com/wdsi/filesubmission> so it stops being flagged.
+
+**BETA: 1.8.13-beta.2.** Download the [Latest beta release](https://github.com/pupontech/screenconnect-cleanup/releases/tag/v1.8.13-beta.2).
+Includes the end-to-end review fixes, the reviewed cleanup repairs, persistence selection checkboxes, staged KVRT in Offline mode,
+clear Online continuation choices and preserved Online attempts. Live elevated Windows acceptance
+is still required. Existing releases remain available; the installer command below downloads GitHub's Latest release.
 
 A Windows technician tool for PCs where a scammer got remote access through ScreenConnect. It usually
 gets there from an **invite email the user clicked** (a fake invoice, meeting or "document shared with

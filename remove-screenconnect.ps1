@@ -723,80 +723,41 @@ function Get-PathBinaryLeaf {
     return $s
 }
 
-function Test-ScreenConnectSignerChain {
-    <#
-        True when the signer certificate chains to a root this PC trusts for
-        code signing, ignoring ONLY revocation and expiry. A self-signed or
-        otherwise untrusted certificate that merely carries the ConnectWise
-        name fails here. Certificates embedded in the file's signature are
-        offered as intermediates so the check also works with no connection.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]$Certificate,
-        [string]$FilePath
-    )
-    $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
-    try {
-        $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
-        $chain.ChainPolicy.VerificationFlags = [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreNotTimeValid
-        [void]$chain.ChainPolicy.ApplicationPolicy.Add((New-Object System.Security.Cryptography.Oid '1.3.6.1.5.5.7.3.3'))
-        if ($FilePath) {
-            try {
-                $embedded = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2Collection
-                $embedded.Import($FilePath)
-                [void]$chain.ChainPolicy.ExtraStore.AddRange($embedded)
-            } catch { }
-        }
-        return [bool]$chain.Build($Certificate)
-    } catch {
-        return $false
-    } finally {
-        try { $chain.Reset() } catch { }
-    }
-}
-
 function Get-ScreenConnectSignatureVerdict {
     <#
-        Decides whether an executable's Authenticode signature identifies it as
-        ScreenConnect for removal. Returns Accepted / Reason / Note.
+        Reads an executable's Authenticode signature for the removal record.
+        The signature does NOT decide removal (owner decision 2026-11-25): the
+        directory, binary-name and service-name gates identify the product, the
+        technician approves each removal by typing, and files are quarantined,
+        never deleted. An intruder's copy is often an old build signed with the
+        revoked ConnectWise certificate (Windows reports UnknownError), and can
+        be unsigned, altered or re-signed; those must be removable too.
 
-        Valid + ConnectWise signer: accepted.
-        UnknownError or NotTrusted + ConnectWise signer whose certificate still
-        chains to a trusted root when revocation and expiry are ignored:
-        accepted with a Note. This is the old ScreenConnect build signed with
-        the ConnectWise certificate that was later revoked, which Windows
-        reports as UnknownError; intruders keep installing those builds.
-        NotSigned, HashMismatch (file changed after signing) and every other
-        status: refused, as is a look-alike certificate that does not chain to
-        a trusted root.
+        Always Accepted. Note is empty for Valid + ConnectWise signer, and
+        otherwise says exactly what was unusual, for the log and the manifest.
     #>
     param([Parameter(Mandatory = $true)][string]$Path)
     try {
         $sig = Get-AuthenticodeSignature -LiteralPath $Path -ErrorAction Stop
     } catch {
-        return [PSCustomObject]@{ Accepted = $false; Reason = "could not verify executable Authenticode signature: $($_.Exception.Message)"; Note = '' }
+        return [PSCustomObject]@{ Accepted = $true; Reason = ''; Note = "SIGNATURE WARNING: the executable's Authenticode signature could not be read ($($_.Exception.Message)); removed on the directory, binary-name and service-name match" }
     }
     $status = [string]$sig.Status
     $subject = if ($sig.SignerCertificate) { [string]$sig.SignerCertificate.Subject } else { '' }
     $signerOk = ($subject -match '(?i)ConnectWise|ScreenConnect')
-    if ($status -eq 'Valid') {
-        if ($signerOk) { return [PSCustomObject]@{ Accepted = $true; Reason = ''; Note = '' } }
-        return [PSCustomObject]@{ Accepted = $false; Reason = "executable signer is not identified as ConnectWise/ScreenConnect: $subject"; Note = '' }
+    if ($status -eq 'Valid' -and $signerOk) { return [PSCustomObject]@{ Accepted = $true; Reason = ''; Note = '' } }
+    $msg = ([string]$sig.StatusMessage).Trim()
+    $what = switch ($status) {
+        'Valid'        { 'validly signed, but not by ConnectWise/ScreenConnect' }
+        'NotSigned'    { 'not signed' }
+        'HashMismatch' { 'changed after it was signed (hash mismatch)' }
+        default        { "signed, but Windows does not confirm the signature (for example a revoked certificate)" }
     }
-    if ($status -in @('UnknownError', 'NotTrusted') -and $sig.SignerCertificate) {
-        if (-not $signerOk) {
-            return [PSCustomObject]@{ Accepted = $false; Reason = "executable signature status is not Valid: $status; signer is not identified as ConnectWise/ScreenConnect: $subject"; Note = '' }
-        }
-        if (Test-ScreenConnectSignerChain -Certificate $sig.SignerCertificate -FilePath $Path) {
-            $msg = ([string]$sig.StatusMessage).Trim()
-            return [PSCustomObject]@{
-                Accepted = $true; Reason = ''
-                Note     = "signature status is $status ($msg) but the file is intact and its ConnectWise signer certificate chains to a trusted root when revocation and expiry are ignored; treated as a ScreenConnect build signed with a revoked or uncheckable certificate. Signer: $subject"
-            }
-        }
-        return [PSCustomObject]@{ Accepted = $false; Reason = "executable signature status is not Valid: $status; the signer certificate does not chain to a trusted root, so the ConnectWise name on it proves nothing: $subject"; Note = '' }
+    $signerText = if ($subject) { $subject } else { 'none' }
+    return [PSCustomObject]@{
+        Accepted = $true; Reason = ''
+        Note     = "SIGNATURE WARNING: the executable is $what. Status: $status" + $(if ($msg) { " ($msg)" } else { '' }) + ". Signer: $signerText. Removed on the directory, binary-name and service-name match"
     }
-    return [PSCustomObject]@{ Accepted = $false; Reason = "executable signature status is not Valid: $status"; Note = '' }
 }
 
 function Test-ScreenConnectInstance {
@@ -873,8 +834,9 @@ function Test-ScreenConnectInstance {
         }
     }
 
-    # Gate D: execute mode requires a real signed binary. Name/path matches are
-    # useful for discovery but are not sufficient authorization for removal.
+    # Gate D: execute mode requires an existing ScreenConnect executable. Its
+    # signature is recorded as a note and never blocks removal (see
+    # Get-ScreenConnectSignatureVerdict).
     if ($Execute) {
         $signedExe = $null
         foreach ($p in $pathStrings) {
@@ -2104,7 +2066,7 @@ foreach ($inst in $scInstancesArray) {
             $verifyNote = (@($verification.Notes) -join '; ')
             Write-Log "  Product verification passed"
             if ($verifyNote) { Write-Log "  NOTE: $verifyNote" 'Warn' }
-            Add-ManifestEntry -InstanceId $instanceId -Action 'ProductVerification' -Target 'N/A' -Result 'Passed' -Details ('Entry identity and Authenticode signer confirmed against ScreenConnect patterns' + $(if ($verifyNote) { '. ' + $verifyNote } else { '' }))
+            Add-ManifestEntry -InstanceId $instanceId -Action 'ProductVerification' -Target 'N/A' -Result 'Passed' -Details ('Entry identity confirmed against ScreenConnect directory, binary and service patterns' + $(if ($verifyNote) { '. ' + $verifyNote } else { '' }))
             # The execute gate confirms a known binary name and a valid
             # ConnectWise/ScreenConnect Authenticode signer. Review the full
             # manifest before removal; signature proof does not replace operator

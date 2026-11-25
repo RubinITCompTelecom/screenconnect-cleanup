@@ -17,7 +17,7 @@
 > Microsoft at <https://www.microsoft.com/wdsi/filesubmission> so it stops being flagged.
 
 **BETA: 1.8.13-beta.3.** Download the [Latest beta release](https://github.com/pupontech/screenconnect-cleanup/releases/tag/v1.8.13-beta.3).
-Removes ScreenConnect builds signed with the revoked ConnectWise certificate and adds a Continue online button. Includes the end-to-end review fixes, the reviewed cleanup repairs, persistence selection checkboxes, staged KVRT in Offline mode,
+A ScreenConnect copy is now removed whatever its digital signature says (revoked certificate, unsigned, altered), and there is a Continue online button. Includes the end-to-end review fixes, the reviewed cleanup repairs, persistence selection checkboxes, staged KVRT in Offline mode,
 clear Online continuation choices and preserved Online attempts. Live elevated Windows acceptance
 is still required. Existing releases remain available; the installer command below downloads GitHub's Latest release.
 

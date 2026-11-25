@@ -33,9 +33,16 @@ scam victim's PC with an active remote session):
 `START-HERE-OFFLINE.bat`. The package `connectwise-report.zip` and `report.html`
 stay in the run folder under `C:\RIT-SCC\`. Nothing is shared.
 
+**ScreenConnect icon in the tray** (teal, two overlapping windows; tooltip
+*ScreenConnect Client*; see the screenshots in the README): treat the PC as
+still reachable by the scammer. Stage on a **separate, clean computer**, copy
+the folder to a USB stick, take the infected PC off the network, and run
+`START-HERE-OFFLINE.bat` first. Go online on that PC only after the offline
+half has removed ScreenConnect.
+
 **Preparing a USB stick or a folder for a no-connection job:** run Stage tools
-in the GUI or `START-HERE.bat --stage` while connected, then copy the complete
-folder. Offline offers already-staged KVRT after ScreenConnect removal,
+in the GUI or `START-HERE.bat --stage` while connected (on a separate computer,
+not the infected one), then copy the complete folder. Offline offers already-staged KVRT after ScreenConnect removal,
 before the persistence check and final snapshots. Missing KVRT is skipped;
 the cleanup tool does not download replacements. Without staging, the cleanup
 still runs. ESET is Online-only because it needs internet. Malwarebytes installation

@@ -646,8 +646,9 @@ echo.
 echo  ============================================================
 echo   STAGE TOOLS - needs internet
 echo   Downloads the tool pack and the KVRT / ESET scanners into this
-echo   folder. Run it on a connected PC, then copy this whole folder
-echo   to the client PC for the offline half. Malwarebytes is not
+echo   folder. Run it on a separate, clean, connected PC - not on the
+echo   infected one - then copy this whole folder to the client PC and
+echo   run the offline half there first. Malwarebytes is not
 echo   staged here: the online half installs it when it runs.
 echo  ============================================================
 echo.

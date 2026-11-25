@@ -2,6 +2,20 @@
 
 > Designed by [pupontech](https://github.com/pupontech) in collaboration with Rubin IT. A read-only mirror of this repository is kept at [RubinITCompTelecom/screenconnect-cleanup](https://github.com/RubinITCompTelecom/screenconnect-cleanup). Make changes in [pupontech/screenconnect-cleanup](https://github.com/pupontech/screenconnect-cleanup).
 
+> **Microsoft Defender may flag this tool. It is a false positive.** The tool does what malware
+> removers do: it finds and removes a remote-access program, moves files to quarantine, runs
+> PowerShell scripts, and downloads antivirus scanners. Defender's behaviour checks can mistake that
+> for an attack. The 1.8.13-beta.2 release zip scans clean on
+> [VirusTotal: 0 of 65 engines, Microsoft included](https://www.virustotal.com/gui/file/55143747409e65d201d2a09e90b2a19a6b66ba729a0f79532ae86b6a73395355)
+> (scanned November 25, 2026). SHA-256 of `screenconnect-cleanup-v1.8.13-beta.2.zip`:
+> `55143747409e65d201d2a09e90b2a19a6b66ba729a0f79532ae86b6a73395355`.
+>
+> **If Defender blocks it:** first check the zip's hash matches the one above
+> (`Get-FileHash .\screenconnect-cleanup-v1.8.13-beta.2.zip`). If it matches, open
+> **Windows Security > Virus & threat protection > Protection history**, pick the item and choose
+> **Allow on device** (or **Restore**). Do not turn Defender off. Please also report the false positive to
+> Microsoft at <https://www.microsoft.com/wdsi/filesubmission> so it stops being flagged.
+
 **BETA: 1.8.13-beta.2.** Download the [Latest beta release](https://github.com/pupontech/screenconnect-cleanup/releases/tag/v1.8.13-beta.2).
 Includes the end-to-end review fixes, the reviewed cleanup repairs, persistence selection checkboxes, staged KVRT in Offline mode,
 clear Online continuation choices and preserved Online attempts. Live elevated Windows acceptance
@@ -59,9 +73,35 @@ matters: a host you do not recognise is the scammer's.
 
 ![Finished run: one card per ScreenConnect instance, relay host first](docs/images/gui-results.png)
 
+### First: is ScreenConnect in the tray?
+
+Before you plug anything into the PC, look at the notification area next to the clock (click **^** to
+see the hidden icons). The ScreenConnect client shows a teal icon of two overlapping windows; hover it
+and the tooltip reads *ScreenConnect Client*. While someone is connected you may also see a
+"Connected" notification and a banner at the top of the screen saying *Your computer is being
+controlled by ...*.
+
+![ScreenConnect client icon in the Windows tray (teal, two overlapping windows)](docs/images/screenconnect-tray-icon.png)
+
+![ScreenConnect Client "Connected" notification above the tray icon](docs/images/screenconnect-connected-notification.png)
+
+![Banner shown on the PC during a session: "Your computer is being controlled by ..."](docs/images/screenconnect-banner.png)
+
+<sub>Screenshots: ScreenConnect's own blog, [ScreenConnect Customizations: What's Different and Why](https://www.screenconnect.com/blog/customization-update) (August 2025). Older versions and custom-branded copies can look different; scammers have also been seen renaming the icon to look like Defender or another app, so no icon does not prove it is clean.</sub>
+
+**If you see it, assume the scammer can still get in, and:**
+
+1. **Stage on a separate, clean computer**, not on this PC: run **Stage tools** (or
+   `START-HERE.bat --stage`) on your own PC, then copy the whole folder to a USB stick. Do not go online
+   on the infected PC to download anything.
+2. **Take the infected PC off the network** (unplug the cable, turn Wi-Fi off) before you plug the stick in.
+3. **Run Offline first.** Only reconnect and run **Online** once the Offline run has removed
+   ScreenConnect.
+
 ### The usual job
 
 1. **Take the PC off the network** (unplug the cable, turn Wi-Fi off) if a session might still be live.
+   If ScreenConnect is in the tray, stage the tools on a separate computer first (see above).
 2. Run **Offline**. For each ScreenConnect instance choose **Remove** (the default) or **Keep** (for
    example the customer's own support agent). Type `REMOVE` to confirm; the button stays disabled
    until you do.

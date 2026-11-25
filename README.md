@@ -110,7 +110,7 @@ controlled by ...*.
 
 3. When asked to open the review windows, say **Yes** and go through them (see below).
 4. Read the report. It opens by itself and a copy is left on the Desktop.
-5. **Reconnect** and run **Online**. Say yes to continuing the offline run; run the scanners you want.
+5. **Reconnect** and press **Continue online** (next to **Start over**), or run **Online** from the start screen. Say yes to continuing the offline run; run the scanners you want.
    If *Share the sanitized report* is ticked (it is by default), the report is shared at the end and the
    link appears in the window and in the report. Untick it and nothing is uploaded.
 

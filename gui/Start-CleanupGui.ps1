@@ -100,7 +100,7 @@ $ui = @{}
 $controlNames = 'TitleText', 'InfoText', 'RunText', 'BtnOpenRitRoot','StepperHost', 'StartPanel',
 'RbOffline', 'RbOnline', 'RbDetect', 'RbStage', 'SharePanel', 'CbShare', 'BtnStart', 'PriorRunsText',
 'RunPanel', 'StatusTitle', 'StatusDetail', 'Busy', 'Banner', 'BannerText', 'ReviewBar', 'ReviewSummary', 'BtnReviewContinue',
-'CardsHost', 'BtnOpenReport', 'BtnOpenRun', 'BtnRestart', 'BtnNewRun', 'BtnCopy', 'BtnOpenLog', 'ConsoleBox',
+'CardsHost', 'BtnOpenReport', 'BtnOpenRun', 'BtnRestart', 'BtnNewRun', 'BtnContinueOnline', 'BtnCopy', 'BtnOpenLog', 'ConsoleBox',
 'RowConsole', 'ColStepper', 'LinkRubinIt', 'LinkPupontech', 'RootGrid', 'HeaderCard', 'StatusCard',
 'ScanControls', 'BtnPauseScan', 'BtnStopScan', 'ScanControlHint'
 $missing = @()
@@ -914,6 +914,7 @@ function Start-Run {
     $ui.Banner.Visibility = 'Collapsed'
     $ui.ReviewBar.Visibility = 'Collapsed'
     $ui.BtnNewRun.Visibility = 'Collapsed'
+    $ui.BtnContinueOnline.Visibility = 'Collapsed'
     $ui.BtnRestart.Visibility = 'Collapsed'
     $label = $(if ($ModeName -eq 'Full') { $script:OneGoLabel } else { $script:ModeLabels[$ModeName] })
     $ui.InfoText.Text = 'PC: ' + $env:COMPUTERNAME + '     Mode: ' + $label
@@ -1077,6 +1078,8 @@ function Complete-Run {
         Show-Banner ('Finished. ' + $n + ' ScreenConnect instance(s) were found on this PC.' + $(if ($sess.Mode -eq 'Detect') { ' Nothing was changed.' } else { '' }) + $tail) 'ok'
     }
     $ui.BtnNewRun.Visibility = 'Visible'
+    # After the Offline half: one click to the Online half (it still asks how to use the Offline results).
+    if ($sess.Mode -eq 'Offline' -and -not $sess.Stopped) { $ui.BtnContinueOnline.Visibility = 'Visible' }
     # The restart offer appears under the batch file's three conditions only.
     if ($sess.PowerRepairRan -and $sess.ReportRc -eq 0 -and $sess.ReportOpened -and -not $sess.Stopped) { $ui.BtnRestart.Visibility = 'Visible' }
     Update-Stepper
@@ -1198,6 +1201,7 @@ function Write-ResultFile {
             RunRoot = $script:Session.RunRoot; FindingsJson = $script:Session.FindingsJson
             ConsoleChars = $ui.ConsoleBox.Text.Length; OpenReportEnabled = [bool]$ui.BtnOpenReport.IsEnabled
             RestartVisible = ($ui.BtnRestart.Visibility -eq 'Visible')
+            ContinueOnlineVisible = ($ui.BtnContinueOnline.Visibility -eq 'Visible')
             DpiMode = $script:DpiMode; DpiScale = $script:DpiScale
             WindowWidth = $win.ActualWidth; WindowHeight = $win.ActualHeight
             CompactWidth = [bool]$script:Compact.Width; CompactHeight = [bool]$script:Compact.Height
@@ -1370,6 +1374,17 @@ $ui.BtnNewRun.add_Click({
         $script:ShareUrl = ''; $script:ShareSkipped = ''
         $ui.RunText.Text = 'Run folder: none yet'
         Set-PreviewMode (Get-SelectedMode); Update-HeaderButtons; Show-Panel 'Start'
+    })
+$ui.BtnContinueOnline.add_Click({
+        # Same reset as Start over, then the Online half. Start-Run asks how to use the Offline results and
+        # says whether the report will be shared; cancelling there lands on the start screen with Online
+        # selected, where the share box can be unticked.
+        $script:Session = $null; $script:Action = $null; $script:Child = $null; $script:LogPath = ''; $script:Finished = $false
+        $script:ShareUrl = ''; $script:ShareSkipped = ''
+        $ui.RunText.Text = 'Run folder: none yet'
+        $ui.RbOnline.IsChecked = $true
+        Set-PreviewMode 'Online'; Update-HeaderButtons; Show-Panel 'Start'
+        Start-Run 'Online'
     })
 $ui.BtnRestart.add_Click({
         $ans = [System.Windows.MessageBox]::Show("The report was opened above. Restart closes apps without warning and may lose unsaved work.`n`nCommand: shutdown /r /t 0 /f`n`nRestart now?", 'ScreenConnect Cleanup', 'YesNo', 'Warning')

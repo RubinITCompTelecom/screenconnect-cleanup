@@ -27,7 +27,7 @@ Check ($gui.Contains('Failed = 5; Resurrection = 4; Warn = 3; Cancelled = 2; Don
 Check ($gui.Contains('elseif ($script:ShareSkipped)')) 'GUI reports skipped upload for either share step'
 Check ($gui.Contains('Staging incomplete. Missing:')) 'GUI stage banner names missing tools'
 Check ($pre.Contains('& $ScriptPath -Verify -Quiet | Out-Null') -and $pre.Contains('$rc = $LASTEXITCODE')) 'preflight verification uses child exit code only'
-Check ($sc.Contains('$ScriptVersion = ''1.8.13-beta.2''')) 'sc-cleanup version matches VERSION'
+Check ($sc.Contains('$ScriptVersion = ''1.8.13-beta.3''')) 'sc-cleanup version matches VERSION'
 if ($fail.Count) { exit 1 }
 Write-Host 'Launcher/gui fix contract checks passed.' -ForegroundColor Green
 exit 0

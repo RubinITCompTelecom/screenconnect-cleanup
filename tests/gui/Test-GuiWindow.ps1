@@ -235,6 +235,7 @@ try {
         Check (-not $s.Stopped -and $s.FinalStatus -eq 0 -and $s.Banner -match 'Nothing was downloaded or uploaded') 'the run ended clean and the banner points to the online half'
         Check ((@($s.KeepIdentifiers) -join ',') -eq 'bbbb2222bbbb2222') 'the window recorded the keep selection'
         Check ($s.RestartVisible -eq $false) 'no restart offer when no power repair ran'
+        Check ($s.ContinueOnlineVisible -eq $true) 'a finished Offline run offers Continue online next to Start over'
         $guiLog = Join-Path $s.RunRoot 'logs\gui-console.log'
         Check ((Test-Path -LiteralPath $guiLog) -and ((Get-Content -LiteralPath $guiLog -Raw) -match 'GUI sent answer: y')) 'the console log records the answer sent to the script'
         $texts = @($s.CardTexts)
@@ -272,6 +273,7 @@ try {
         AvUninstall = @{ Value = 'n' } } $off.Harness -Stubs @{ 'Submit-ConnectWiseReport.ps1' = $shareStub; 'Invoke-GUIScanner.ps1' = $retryScannerStub }
     if ($on.State -and $off.State) {
         Check ($on.State.RunRoot -eq $off.State.RunRoot) 'the Online half continued the offline run folder (no new one)'
+        Check ($on.State.ContinueOnlineVisible -eq $false) 'a finished Online run does not offer Continue online'
         $kv = @($on.Calls | Where-Object { $_ -like 'Invoke-GUIScanner.ps1|*-Scanner KVRT*' })
         Check ($kv.Count -eq 2 -and $on.State.Steps.'6a' -eq 'done') 'a scanner whose launch failed was offered again, run again and then completed'
         Check ((@($on.Names | Where-Object { $_ -eq 'Invoke-GUIScanner.ps1' }).Count -eq 4) -and ($on.Names -contains 'Get-AVTools.ps1')) 'it staged the scanners and ran all three (KVRT twice)'

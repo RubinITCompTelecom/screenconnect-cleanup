@@ -20,7 +20,7 @@ function Write-Log { param($Message,$Level) }
 function Write-Section { param($Message) }
 function Get-PlanInstanceId { param($Instance) 'fixture' }
 function Expand-Env { param($Path) $Path }
-function Test-ScreenConnectInstance { param($Instance) [pscustomobject]@{Verified=$true;Reasons=@()} }
+function Test-ScreenConnectInstance { param($Instance) [pscustomobject]@{Verified=$true;Reasons=@();Notes=@()} }
 function Get-VerifiedUninstallEntry { param($RegistryKeyPath,$VerifiedInstallDir,$InstanceId) $script:Entry }
 function Get-UninstallEntriesForInstance { param($InstanceIdentifier) $script:Entry }
 function Run-VendorUninstaller { param($UninstallEntry,$InstanceId,$InstallDir) $null }

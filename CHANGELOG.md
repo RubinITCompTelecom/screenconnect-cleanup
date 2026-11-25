@@ -3,7 +3,13 @@
 Semantic versions. The deploy zip is named `screenconnect-cleanup-v<VER>.zip`
 and carries a `VERSION` file so each build is self-identifying.
 
-## [1.8.13-beta.2] - 2026-11-22 - Latest beta release: end-to-end review fixes
+## [1.8.13-beta.3] - 2026-11-25 - Latest beta release: revoked-certificate removal fix, Continue online
+Hosted Windows CI passed. The signature handling is tested with simulated signatures; it has not yet been confirmed on a real revoked-certificate install.
+- Removal: the executable's digital signature no longer blocks removal. An intruder's ScreenConnect signed with a certificate Windows does not confirm (status `UnknownError`, for example the revoked ConnectWise certificate) was refused with "PRODUCT VERIFICATION FAILED ... signature status is not Valid" and left installed (field case 2026-11-25). Unsigned, altered, re-signed and look-alike copies are now removed too. What identifies the product is unchanged: it must sit in a ScreenConnect directory, have a ScreenConnect binary name and (when it has a service) a ScreenConnect service name, and the technician still approves by typing. Anything other than a valid ConnectWise signature is written as a SIGNATURE WARNING to the log and the removal manifest. Files are quarantined, never deleted.
+- GUI: a finished Offline run shows **Continue online** next to **Start over**. It starts the Online half, which still asks how to use the Offline results.
+- README: Defender false-positive note with the VirusTotal result; what the ScreenConnect tray icon looks like, and to stage on a separate PC and run Offline first when it is there.
+
+## [1.8.13-beta.2] - 2026-11-22 - Earlier beta release: end-to-end review fixes
 Hosted Windows CI and the offline test set passed. Detection, snapshot and diff were also run read-only on a real Windows 11 PC. Live elevated Windows acceptance (removal, scanners, resume) remains outstanding.
 - Removal: the uninstall-entry lookup no longer loses its results, a resume run keeps the first run's manifest entries, a finished resume removes its scheduled task, and a failed entry without an exit code no longer shows 0.
 - Snapshots, diff and detector: the local-administrator flag is correct, the diff exits 2 on unusable input, Temp is walked once, and service-install events and the install folder date are handled correctly.

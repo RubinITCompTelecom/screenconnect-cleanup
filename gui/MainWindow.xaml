@@ -449,6 +449,7 @@
             <Button x:Name="BtnOpenRun" Style="{StaticResource Button.Secondary}" Content="Open run folder" IsEnabled="False"/>
             <Button x:Name="BtnRestart" Style="{StaticResource Button.Secondary}" Content="Restart this PC..." Visibility="Collapsed"/>
             <Button x:Name="BtnNewRun" Style="{StaticResource Button.Secondary}" Content="Start over" Visibility="Collapsed"/>
+            <Button x:Name="BtnContinueOnline" Style="{StaticResource Button.Primary}" Content="Continue online" Visibility="Collapsed"/>
           </WrapPanel>
         </Grid>
       </Grid>

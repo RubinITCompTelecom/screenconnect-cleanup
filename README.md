@@ -7,6 +7,20 @@ Includes the end-to-end review fixes, the reviewed cleanup repairs, persistence 
 clear Online continuation choices and preserved Online attempts. Live elevated Windows acceptance
 is still required. Existing releases remain available; the installer command below downloads GitHub's Latest release.
 
+> **Microsoft Defender may flag this tool. It is a false positive.** The tool does what malware
+> removers do: it finds and removes a remote-access program, moves files to quarantine, runs
+> PowerShell scripts, and downloads antivirus scanners. Defender's behaviour checks can mistake that
+> for an attack. The 1.8.13-beta.2 release zip scans clean on
+> [VirusTotal: 0 of 65 engines, Microsoft included](https://www.virustotal.com/gui/file/55143747409e65d201d2a09e90b2a19a6b66ba729a0f79532ae86b6a73395355)
+> (scanned November 25, 2026). SHA-256 of `screenconnect-cleanup-v1.8.13-beta.2.zip`:
+> `55143747409e65d201d2a09e90b2a19a6b66ba729a0f79532ae86b6a73395355`.
+>
+> **If Defender blocks it:** first check the zip's hash matches the one above
+> (`Get-FileHash .\screenconnect-cleanup-v1.8.13-beta.2.zip`). If it matches, open
+> **Windows Security > Virus & threat protection > Protection history**, pick the item and choose
+> **Allow on device** (or **Restore**). Do not turn Defender off. Please also report the false positive to
+> Microsoft at <https://www.microsoft.com/wdsi/filesubmission> so it stops being flagged.
+
 A Windows technician tool for PCs where a scammer got remote access through ScreenConnect. It usually
 gets there from an **invite email the user clicked** (a fake invoice, meeting or "document shared with
 you"), which installs ScreenConnect connected to the scammer's server.
